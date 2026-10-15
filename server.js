@@ -643,7 +643,8 @@ async function handleApi(req, res, url) {
 function serveStatic(req, res, url) {
   let pathname = decodeURIComponent(url.pathname);
   if (pathname === "/") pathname = "/index.html";
-  const file = path.normalize(path.join(PUBLIC, pathname));
+  const relative = pathname.replace(/^\/+/, "");
+  const file = path.normalize(path.join(PUBLIC, relative));
   const root = path.normalize(PUBLIC);
   if (!file.startsWith(root)) {
     res.status(403).end("Forbidden");
