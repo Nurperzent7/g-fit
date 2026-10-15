@@ -372,40 +372,47 @@ function ensureMedia() {
   }
 }
 
+function endBody(res, status, body, headers) {
+  res.status(status);
+  Object.entries(headers).forEach(([key, value]) => res.setHeader(key, value));
+  if (res.req.method === "HEAD") {
+    res.end();
+    return;
+  }
+  res.end(body);
+}
+
 function streamFile(req, res, file, type) {
-  const stat = fs.statSync(file);
+  const data = fs.readFileSync(file);
   const range = req.headers.range;
   if (!range) {
-    res.writeHead(200, {
+    endBody(res, 200, data, {
       "Content-Type": type,
-      "Content-Length": stat.size,
+      "Content-Length": data.length,
       "Accept-Ranges": "bytes",
       "Cache-Control": "private, max-age=3600"
     });
-    fs.createReadStream(file).pipe(res);
     return;
   }
   const match = String(range).match(/bytes=(\d+)-(\d*)/);
   if (!match) {
-    res.writeHead(416);
-    res.end();
+    res.status(416).end();
     return;
   }
   const start = Number(match[1]);
-  const end = match[2] ? Number(match[2]) : stat.size - 1;
-  if (start >= stat.size || end >= stat.size) {
-    res.writeHead(416);
-    res.end();
+  const end = match[2] ? Number(match[2]) : data.length - 1;
+  if (start >= data.length || end >= data.length || start > end) {
+    res.status(416).end();
     return;
   }
-  res.writeHead(206, {
+  const slice = data.subarray(start, end + 1);
+  endBody(res, 206, slice, {
     "Content-Type": type,
-    "Content-Length": end - start + 1,
-    "Content-Range": `bytes ${start}-${end}/${stat.size}`,
+    "Content-Length": slice.length,
+    "Content-Range": `bytes ${start}-${end}/${data.length}`,
     "Accept-Ranges": "bytes",
     "Cache-Control": "private, max-age=3600"
   });
-  fs.createReadStream(file, { start, end }).pipe(res);
 }
 
 async function handleApi(req, res, url) {
@@ -637,23 +644,26 @@ function serveStatic(req, res, url) {
   let pathname = decodeURIComponent(url.pathname);
   if (pathname === "/") pathname = "/index.html";
   const file = path.normalize(path.join(PUBLIC, pathname));
-  if (!file.startsWith(PUBLIC)) {
-    res.writeHead(403);
-    res.end("Forbidden");
+  const root = path.normalize(PUBLIC);
+  if (!file.startsWith(root)) {
+    res.status(403).end("Forbidden");
     return;
   }
-  if (fs.existsSync(file) && fs.statSync(file).isFile()) {
-    const ext = path.extname(file).toLowerCase();
-    res.writeHead(200, {
-      "Content-Type": MIME[ext] || "application/octet-stream",
-      "X-Content-Type-Options": "nosniff",
-      "Cache-Control": ext === ".html" ? "no-cache" : "public, max-age=300"
-    });
-    fs.createReadStream(file).pipe(res);
+  const target = fs.existsSync(file) && fs.statSync(file).isFile()
+    ? file
+    : path.join(PUBLIC, "index.html");
+  if (!fs.existsSync(target)) {
+    res.status(404).type("text").end("Not found");
     return;
   }
-  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" });
-  fs.createReadStream(path.join(PUBLIC, "index.html")).pipe(res);
+  const ext = path.extname(target).toLowerCase();
+  const body = fs.readFileSync(target);
+  endBody(res, 200, body, {
+    "Content-Type": MIME[ext] || "application/octet-stream",
+    "Content-Length": body.length,
+    "X-Content-Type-Options": "nosniff",
+    "Cache-Control": ext === ".html" ? "no-cache" : "public, max-age=300"
+  });
 }
 
 ensureMedia();
