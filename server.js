@@ -1,14 +1,22 @@
-import http from "http";
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
+import express from "express";
 import { fileURLToPath } from "url";
 import { ACCESS_DAYS, COURSES, TARIFFS } from "./server/content.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PUBLIC = path.join(__dirname, "public");
-const MEDIA = path.join(__dirname, "media");
-const DB_PATH = path.join(__dirname, "data", "db.json");
+
+function existingDir(name) {
+  const options = [path.join(process.cwd(), name), path.join(__dirname, name)];
+  return options.find((dir) => fs.existsSync(dir)) || options[0];
+}
+
+const PUBLIC = existingDir("public");
+const MEDIA = existingDir("media");
+const DB_PATH = path.join(process.env.VERCEL ? "/tmp" : __dirname, "data", "db.json");
+const BLOB_PATH = "gfit/db.json";
+const useBlob = () => Boolean(process.env.BLOB_STORE_ID || process.env.BLOB_READ_WRITE_TOKEN);
 const PORT = process.env.PORT || 3080;
 const SCHEMA = 1;
 
@@ -52,7 +60,7 @@ function addDays(dateStr, days) {
   return iso(d);
 }
 
-function loadDb() {
+function readFileDb() {
   if (!fs.existsSync(DB_PATH)) return null;
   try {
     return JSON.parse(fs.readFileSync(DB_PATH, "utf8"));
@@ -61,9 +69,27 @@ function loadDb() {
   }
 }
 
-function saveDb() {
+async function readBlobDb() {
+  const { get } = await import("@vercel/blob");
+  const file = await get(BLOB_PATH, { access: "private", useCache: false });
+  if (!file || file.statusCode !== 200 || !file.stream) return null;
+  return JSON.parse(await new Response(file.stream).text());
+}
+
+async function saveDb() {
+  const payload = JSON.stringify(db);
+  if (useBlob()) {
+    const { put } = await import("@vercel/blob");
+    await put(BLOB_PATH, payload, {
+      access: "private",
+      allowOverwrite: true,
+      addRandomSuffix: false,
+      cacheControlMaxAge: 0
+    });
+    return;
+  }
   fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
-  fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2));
+  fs.writeFileSync(DB_PATH, payload);
 }
 
 function seed() {
@@ -109,10 +135,27 @@ function seed() {
   };
 }
 
-let db = loadDb();
-if (!db || db.schema !== SCHEMA) {
-  db = seed();
-  saveDb();
+let db = seed();
+let ready;
+
+function ensureReady() {
+  if (!ready) {
+    ready = (async () => {
+      let loaded = null;
+      try {
+        loaded = useBlob() ? await readBlobDb() : readFileDb();
+      } catch (error) {
+        console.error("Не удалось прочитать базу", error);
+      }
+      if (!loaded || loaded.schema !== SCHEMA) {
+        db = seed();
+        await saveDb();
+        return;
+      }
+      db = loaded;
+    })();
+  }
+  return ready;
 }
 
 function uid(prefix) {
@@ -260,10 +303,10 @@ function clearCookie(name) {
   return `${name}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
 }
 
-function createUserSession(user) {
+async function createUserSession(user) {
   const token = crypto.randomBytes(24).toString("hex");
   db.sessions[token] = { email: user.email, exp: Date.now() + 1000 * 60 * 60 * 24 * 30 };
-  saveDb();
+  await saveDb();
   return token;
 }
 
@@ -320,9 +363,13 @@ function writeWav(file) {
 }
 
 function ensureMedia() {
-  fs.mkdirSync(MEDIA, { recursive: true });
-  const wav = path.join(MEDIA, "ambient.wav");
-  if (!fs.existsSync(wav)) writeWav(wav);
+  try {
+    fs.mkdirSync(MEDIA, { recursive: true });
+    const wav = path.join(MEDIA, "ambient.wav");
+    if (!fs.existsSync(wav)) writeWav(wav);
+  } catch (error) {
+    console.error("Медиа уже входит в сборку", error.message);
+  }
 }
 
 function streamFile(req, res, file, type) {
@@ -364,6 +411,7 @@ function streamFile(req, res, file, type) {
 async function handleApi(req, res, url) {
   const pathname = url.pathname;
   try {
+    await ensureReady();
     if (req.method === "POST" && pathname === "/api/auth/register") {
       const body = await readBody(req);
       const name = String(body.name || "").trim().slice(0, 60);
@@ -389,7 +437,7 @@ async function handleApi(req, res, url) {
         createdAt: iso(new Date())
       };
       db.users.push(user);
-      const token = createUserSession(user);
+      const token = await createUserSession(user);
       return send(res, 200, { token, ...mePayload(user) }, { "Set-Cookie": setSessionCookie(res, "gfit", token) });
     }
 
@@ -400,14 +448,14 @@ async function handleApi(req, res, url) {
       if (!user || !verifyPassword(String(body.password || ""), user.password)) {
         return send(res, 401, { error: "Неверная почта или пароль" });
       }
-      const token = createUserSession(user);
+      const token = await createUserSession(user);
       return send(res, 200, { token, ...mePayload(user) }, { "Set-Cookie": setSessionCookie(res, "gfit", token) });
     }
 
     if (req.method === "POST" && pathname === "/api/auth/logout") {
       const auth = userFrom(req);
       if (auth) delete db.sessions[auth.token];
-      saveDb();
+      await saveDb();
       return send(res, 200, { ok: true }, { "Set-Cookie": clearCookie("gfit") });
     }
 
@@ -448,7 +496,7 @@ async function handleApi(req, res, url) {
           if (session.email === prevEmail) session.email = nextEmail;
         });
       }
-      saveDb();
+      await saveDb();
       return send(res, 200, mePayload(user));
     }
 
@@ -489,7 +537,7 @@ async function handleApi(req, res, url) {
         createdAt: new Date().toISOString()
       };
       db.requests.unshift(request);
-      saveDb();
+      await saveDb();
       return send(res, 200, { request, ...mePayload(auth.user) });
     }
 
@@ -512,14 +560,14 @@ async function handleApi(req, res, url) {
       }
       const token = crypto.randomBytes(24).toString("hex");
       db.adminSessions[token] = { exp: Date.now() + 1000 * 60 * 60 * 12 };
-      saveDb();
+      await saveDb();
       return send(res, 200, { ok: true }, { "Set-Cookie": setSessionCookie(res, "gfit_admin", token) });
     }
 
     if (req.method === "POST" && pathname === "/api/admin/logout") {
       const admin = adminFrom(req);
       if (admin) delete db.adminSessions[admin.token];
-      saveDb();
+      await saveDb();
       return send(res, 200, { ok: true }, { "Set-Cookie": clearCookie("gfit_admin") });
     }
 
@@ -542,7 +590,7 @@ async function handleApi(req, res, url) {
       if (!request) return send(res, 404, { error: "Заявка не найдена" });
       request.status = "approved";
       grant(request.email, request.courseId, request.tariffId);
-      saveDb();
+      await saveDb();
       return send(res, 200, { ok: true, requests: db.requests, access: db.access });
     }
 
@@ -551,7 +599,7 @@ async function handleApi(req, res, url) {
       const request = db.requests.find((item) => item.id === id);
       if (!request) return send(res, 404, { error: "Заявка не найдена" });
       request.status = "rejected";
-      saveDb();
+      await saveDb();
       return send(res, 200, { ok: true, requests: db.requests });
     }
 
@@ -562,7 +610,7 @@ async function handleApi(req, res, url) {
       const user = db.users.find((item) => item.email === email);
       if (!user || !courseId) return send(res, 400, { error: "Проверьте почту и курс" });
       grant(email, courseId, "manual");
-      saveDb();
+      await saveDb();
       return send(res, 200, { ok: true, access: db.access });
     }
 
@@ -575,7 +623,7 @@ async function handleApi(req, res, url) {
       if (body.adminPassword && String(body.adminPassword).length >= 6) {
         db.settings.adminPassword = hashPassword(String(body.adminPassword));
       }
-      saveDb();
+      await saveDb();
       return send(res, 200, { ok: true, settings: billing() });
     }
 
@@ -610,10 +658,11 @@ function serveStatic(req, res, url) {
 
 ensureMedia();
 
-const server = http.createServer((req, res) => {
-  const url = new URL(req.url, `http://${req.headers.host}`);
+const app = express();
+app.use(async (req, res) => {
+  const url = new URL(req.originalUrl || req.url, `http://${req.headers.host || "localhost"}`);
   if (url.pathname.startsWith("/api/")) {
-    handleApi(req, res, url);
+    await handleApi(req, res, url);
     return;
   }
   if (req.method !== "GET" && req.method !== "HEAD") {
@@ -624,6 +673,10 @@ const server = http.createServer((req, res) => {
   serveStatic(req, res, url);
 });
 
-server.listen(PORT, () => {
-  console.log(`G-FIT http://localhost:${PORT}`);
-});
+export default app;
+
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`G-FIT http://localhost:${PORT}`);
+  });
+}
