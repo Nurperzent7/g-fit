@@ -18,10 +18,9 @@ function New-Splash([int]$w, [int]$h) {
   $fontPx = [single]($w * 0.055)
   $font = New-Object System.Drawing.Font "Segoe UI", $fontPx, ([System.Drawing.FontStyle]::Bold), ([System.Drawing.GraphicsUnit]::Pixel)
   $labelSize = $g.MeasureString("G-FIT", $font)
-  $gap = [int]($w * 0.045)
-  $block = $iconSize + $gap + [int]$labelSize.Height
+  $gap = [int]($w * 0.04)
   $x = [int](($w - $iconSize) / 2)
-  $y = [int](($h - $block) / 2)
+  $y = [int](($h - $iconSize) / 2)
   $radius = [Math]::Max(8, [int]($iconSize * 0.22))
   $diameter = $radius * 2
   $path = New-Object System.Drawing.Drawing2D.GraphicsPath
