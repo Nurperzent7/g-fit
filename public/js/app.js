@@ -797,6 +797,7 @@ function paintChrome() {
 }
 
 function render() {
+  document.getElementById("boot")?.remove();
   syncLesson();
   view().innerHTML = screenHtml();
   paintChrome();
