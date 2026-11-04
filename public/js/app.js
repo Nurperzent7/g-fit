@@ -509,7 +509,7 @@ function homeScreen() {
       <div class="steps-top"><span>Шагомер</span><span>${num(state.local.stepGoal)} цель</span></div>
       <div class="step-num">${num(steps)}</div>
       <div>шагов за день</div>
-      <div class="btn-row" style="margin-top:14px"><button class="btn-soft" type="button" data-action="sheet" data-sheet="steps">Внести шаги</button></div>
+      <button class="btn-soft" style="margin-top:14px;width:100%" type="button" data-action="sheet" data-sheet="steps">Внести шаги</button>
     </div>
     <h2>Мои замеры</h2>
     <div class="card">
@@ -1758,13 +1758,22 @@ window.addEventListener("beforeinstallprompt", (event) => {
 });
 
 if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("/sw.js?v=11").then((reg) => {
-    if (reg.waiting) reg.waiting.postMessage({ type: "SKIP_WAITING" });
-    reg.update().catch(() => {});
-  }).catch(() => {});
+  (async () => {
+    try {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map((reg) => reg.update()));
+      const keys = await caches.keys();
+      await Promise.all(keys.filter((key) => key !== "gfit-v12").map((key) => caches.delete(key)));
+    } catch {}
+    navigator.serviceWorker.register("/sw.js?v=12").then((reg) => {
+      reg.waiting?.postMessage({ type: "SKIP_WAITING" });
+      reg.active?.postMessage({ type: "CLEAR_OLD" });
+      reg.update().catch(() => {});
+    }).catch(() => {});
+  })();
   navigator.serviceWorker.addEventListener("controllerchange", () => {
-    if (sessionStorage.getItem("gfit_reloaded") === "1") return;
-    sessionStorage.setItem("gfit_reloaded", "1");
+    if (sessionStorage.getItem("gfit_reloaded_v12") === "1") return;
+    sessionStorage.setItem("gfit_reloaded_v12", "1");
     location.reload();
   });
 }
