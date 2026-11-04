@@ -16,9 +16,10 @@ const PUBLIC = existingDir("public");
 const MEDIA = existingDir("media");
 const DB_PATH = path.join(process.env.VERCEL ? "/tmp" : __dirname, "data", "db.json");
 const BLOB_PATH = "gfit/db.json";
+const MEDIA_BLOB_PREFIX = "gfit/media/";
 const useBlob = () => Boolean(process.env.BLOB_STORE_ID || process.env.BLOB_READ_WRITE_TOKEN);
 const PORT = process.env.PORT || 3080;
-const SCHEMA = 1;
+const SCHEMA = 2;
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -92,6 +93,14 @@ async function saveDb() {
   fs.writeFileSync(DB_PATH, payload);
 }
 
+function cloneCourses() {
+  return structuredClone(COURSES);
+}
+
+function cloneTariffs() {
+  return structuredClone(TARIFFS);
+}
+
 function seed() {
   const today = iso(new Date());
   return {
@@ -120,6 +129,8 @@ function seed() {
         tariffId: "intimate-6m"
       }
     ],
+    courses: cloneCourses(),
+    tariffs: cloneTariffs(),
     requests: [],
     sessions: {},
     adminSessions: {},
@@ -135,6 +146,23 @@ function seed() {
   };
 }
 
+function migrate(loaded) {
+  let dirty = false;
+  if (!Array.isArray(loaded.courses) || !loaded.courses.length) {
+    loaded.courses = cloneCourses();
+    dirty = true;
+  }
+  if (!Array.isArray(loaded.tariffs) || !loaded.tariffs.length) {
+    loaded.tariffs = cloneTariffs();
+    dirty = true;
+  }
+  if (loaded.schema !== SCHEMA) {
+    loaded.schema = SCHEMA;
+    dirty = true;
+  }
+  return { data: loaded, dirty };
+}
+
 let db = seed();
 let ready;
 
@@ -147,15 +175,120 @@ function ensureReady() {
       } catch (error) {
         console.error("Не удалось прочитать базу", error);
       }
-      if (!loaded || loaded.schema !== SCHEMA) {
+      if (!loaded) {
         db = seed();
         await saveDb();
         return;
       }
-      db = loaded;
+      const migrated = migrate(loaded);
+      db = migrated.data;
+      if (migrated.dirty) await saveDb();
     })();
   }
   return ready;
+}
+
+function courseList() {
+  return Array.isArray(db.courses) ? db.courses : [];
+}
+
+function tariffList() {
+  return Array.isArray(db.tariffs) ? db.tariffs : [];
+}
+
+function findCourse(courseId) {
+  return courseList().find((course) => course.id === courseId) || null;
+}
+
+function slugId(_title, prefix) {
+  return uid(prefix);
+}
+
+function ensureVideosSection(course) {
+  let section = (course.sections || []).find((item) => item.id === "videos");
+  if (section) return section;
+  section = (course.sections || []).find((item) => item.id === "lectures");
+  if (section) return section;
+  if (!Array.isArray(course.sections)) course.sections = [];
+  section = { id: "videos", title: "Видеоуроки", icon: "video", items: [] };
+  course.sections.unshift(section);
+  return section;
+}
+
+function listVideos() {
+  const rows = [];
+  courseList().forEach((course) => {
+    (course.sections || []).forEach((section) => {
+      (section.items || []).forEach((item) => {
+        if (item.type === "video") {
+          rows.push({
+            courseId: course.id,
+            courseTitle: course.title,
+            sectionId: section.id,
+            sectionTitle: section.title,
+            id: item.id,
+            title: item.title,
+            minutes: item.minutes,
+            src: item.src
+          });
+        }
+      });
+    });
+  });
+  return rows;
+}
+
+function removeVideo(courseId, itemId) {
+  const course = findCourse(courseId);
+  if (!course) return false;
+  for (const section of course.sections || []) {
+    const before = (section.items || []).length;
+    section.items = (section.items || []).filter((item) => item.id !== itemId);
+    if (section.items.length !== before) return true;
+  }
+  return false;
+}
+
+function safeMediaName(name) {
+  const raw = path.basename(String(name || "video.mp4"));
+  const ext = (path.extname(raw) || ".mp4").toLowerCase().replace(/[^\w.]/g, "");
+  const allowed = [".mp4", ".webm", ".mov", ".m4v"];
+  const finalExt = allowed.includes(ext) ? ext : ".mp4";
+  return `${Date.now()}-${crypto.randomBytes(3).toString("hex")}${finalExt}`;
+}
+
+function readRawBody(req, limit = 45_000_000) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on("data", (chunk) => {
+      size += chunk.length;
+      if (size > limit) {
+        reject(new Error("Файл слишком большой"));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("error", reject);
+  });
+}
+
+async function storeMediaFile(fileName, buffer, contentType) {
+  if (useBlob()) {
+    const { put } = await import("@vercel/blob");
+    const blob = await put(`${MEDIA_BLOB_PREFIX}${fileName}`, buffer, {
+      access: "public",
+      contentType: contentType || "video/mp4",
+      addRandomSuffix: false,
+      allowOverwrite: true
+    });
+    return blob.url;
+  }
+  fs.mkdirSync(MEDIA, { recursive: true });
+  fs.writeFileSync(path.join(MEDIA, fileName), buffer);
+  return `/api/media/${fileName}`;
 }
 
 function uid(prefix) {
@@ -234,7 +367,7 @@ function viewCourse(course, open) {
 }
 
 function catalogFor(email) {
-  return COURSES.map((course) => viewCourse(course, hasCourse(email, course.id)));
+  return courseList().map((course) => viewCourse(course, hasCourse(email, course.id)));
 }
 
 function accessFor(email) {
@@ -253,8 +386,30 @@ function mePayload(user) {
     access: accessFor(user.email),
     requests: requestsFor(user.email),
     billing: billing(),
-    tariffs: TARIFFS,
+    tariffs: tariffList(),
     catalog: catalogFor(user.email)
+  };
+}
+
+function adminPayload() {
+  return {
+    requests: db.requests,
+    settings: billing(),
+    users: db.users.map(publicUser),
+    access: db.access,
+    courses: courseList().map((course) => ({
+      id: course.id,
+      title: course.title,
+      subtitle: course.subtitle,
+      badge: course.badge,
+      sections: (course.sections || []).map((section) => ({
+        id: section.id,
+        title: section.title,
+        items: (section.items || []).length
+      }))
+    })),
+    tariffs: tariffList(),
+    videos: listVideos()
   };
 }
 
@@ -521,7 +676,7 @@ async function handleApi(req, res, url) {
       const auth = userFrom(req);
       if (!auth) return send(res, 401, { error: "Нужен вход" });
       const body = await readBody(req);
-      const tariff = TARIFFS.find((item) => item.id === body.tariffId);
+      const tariff = tariffList().find((item) => item.id === body.tariffId);
       if (!tariff) return send(res, 404, { error: "Тариф не найден" });
       const pending = db.requests.find((item) => item.email === auth.user.email && item.tariffId === tariff.id && item.status === "pending");
       if (pending) return send(res, 200, { request: pending, duplicate: true, ...mePayload(auth.user) });
@@ -555,9 +710,32 @@ async function handleApi(req, res, url) {
       if (!open) return send(res, 403, { error: "Нет доступа к материалам" });
       const fileName = path.basename(pathname);
       const file = path.join(MEDIA, fileName);
-      if (!file.startsWith(MEDIA) || !fs.existsSync(file)) return send(res, 404, { error: "Файл не найден" });
-      const type = fileName.endsWith(".mp4") ? "video/mp4" : "audio/wav";
-      return streamFile(req, res, file, type);
+      const type = fileName.endsWith(".wav")
+        ? "audio/wav"
+        : fileName.endsWith(".webm")
+          ? "video/webm"
+          : "video/mp4";
+      if (file.startsWith(MEDIA) && fs.existsSync(file)) {
+        return streamFile(req, res, file, type);
+      }
+      if (useBlob()) {
+        try {
+          const { get } = await import("@vercel/blob");
+          const remote = await get(`${MEDIA_BLOB_PREFIX}${fileName}`, { access: "private", useCache: false });
+          if (remote?.statusCode === 200 && remote.stream) {
+            const data = Buffer.from(await new Response(remote.stream).arrayBuffer());
+            return endBody(res, 200, data, {
+              "Content-Type": type,
+              "Content-Length": data.length,
+              "Accept-Ranges": "bytes",
+              "Cache-Control": "private, max-age=3600"
+            });
+          }
+        } catch (error) {
+          console.error("Медиа из Blob", error.message);
+        }
+      }
+      return send(res, 404, { error: "Файл не найден" });
     }
 
     if (req.method === "POST" && pathname === "/api/admin/login") {
@@ -583,12 +761,7 @@ async function handleApi(req, res, url) {
     }
 
     if (req.method === "GET" && pathname === "/api/admin/requests") {
-      return send(res, 200, {
-        requests: db.requests,
-        settings: billing(),
-        users: db.users.map(publicUser),
-        access: db.access
-      });
+      return send(res, 200, adminPayload());
     }
 
     if (req.method === "POST" && pathname.startsWith("/api/admin/requests/") && pathname.endsWith("/approve")) {
@@ -598,7 +771,7 @@ async function handleApi(req, res, url) {
       request.status = "approved";
       grant(request.email, request.courseId, request.tariffId);
       await saveDb();
-      return send(res, 200, { ok: true, requests: db.requests, access: db.access });
+      return send(res, 200, { ok: true, ...adminPayload() });
     }
 
     if (req.method === "POST" && pathname.startsWith("/api/admin/requests/") && pathname.endsWith("/reject")) {
@@ -607,18 +780,103 @@ async function handleApi(req, res, url) {
       if (!request) return send(res, 404, { error: "Заявка не найдена" });
       request.status = "rejected";
       await saveDb();
-      return send(res, 200, { ok: true, requests: db.requests });
+      return send(res, 200, { ok: true, ...adminPayload() });
     }
 
     if (req.method === "POST" && pathname === "/api/admin/grant") {
       const body = await readBody(req);
       const email = String(body.email || "").trim().toLowerCase();
-      const courseId = ["intimate", "kamasutra", "both"].includes(body.courseId) ? body.courseId : "";
+      const courseId = body.courseId === "both" || findCourse(body.courseId) ? body.courseId : "";
       const user = db.users.find((item) => item.email === email);
       if (!user || !courseId) return send(res, 400, { error: "Проверьте почту и курс" });
       grant(email, courseId, "manual");
       await saveDb();
-      return send(res, 200, { ok: true, access: db.access });
+      return send(res, 200, { ok: true, ...adminPayload() });
+    }
+
+    if (req.method === "POST" && pathname === "/api/admin/courses") {
+      const body = await readBody(req);
+      const title = String(body.title || "").trim().slice(0, 80);
+      const subtitle = String(body.subtitle || "").trim().slice(0, 160);
+      const badge = String(body.badge || "Новый").trim().slice(0, 40) || "Новый";
+      const price = Math.max(0, Math.round(Number(body.price) || 0));
+      if (!title) return send(res, 400, { error: "Укажите название курса" });
+      const id = slugId(title, "course");
+      const course = {
+        id,
+        title,
+        subtitle: subtitle || "Новый курс G-FIT",
+        badge,
+        sections: [{ id: "videos", title: "Видеоуроки", icon: "video", items: [] }]
+      };
+      db.courses.push(course);
+      db.tariffs.push({
+        id: `${id}-6m`,
+        courseId: id,
+        title,
+        period: "6 месяцев",
+        price,
+        text: subtitle || "Доступ к курсу на 6 месяцев."
+      });
+      await saveDb();
+      return send(res, 200, { ok: true, course, ...adminPayload() });
+    }
+
+    if (req.method === "DELETE" && pathname.startsWith("/api/admin/courses/")) {
+      const id = pathname.split("/")[4];
+      if (!findCourse(id)) return send(res, 404, { error: "Курс не найден" });
+      db.courses = courseList().filter((course) => course.id !== id);
+      db.tariffs = tariffList().filter((tariff) => tariff.courseId !== id);
+      await saveDb();
+      return send(res, 200, { ok: true, ...adminPayload() });
+    }
+
+    if (req.method === "POST" && pathname === "/api/admin/videos") {
+      const body = await readBody(req);
+      const course = findCourse(body.courseId);
+      if (!course) return send(res, 404, { error: "Курс не найден" });
+      const title = String(body.title || "").trim().slice(0, 120);
+      const src = String(body.src || "").trim();
+      const minutes = Math.max(1, Math.round(Number(body.minutes) || 5));
+      const text = String(body.text || "").trim().slice(0, 2000);
+      if (!title) return send(res, 400, { error: "Укажите название видео" });
+      if (!src || (!src.startsWith("/api/media/") && !/^https?:\/\//i.test(src))) {
+        return send(res, 400, { error: "Нужна ссылка на видео или загруженный файл" });
+      }
+      const section = ensureVideosSection(course);
+      if (!Array.isArray(section.items)) section.items = [];
+      const item = {
+        id: uid("v"),
+        type: "video",
+        title,
+        minutes,
+        count: 1,
+        src,
+        paragraphs: text ? text.split(/\n+/).map((line) => line.trim()).filter(Boolean).slice(0, 12) : []
+      };
+      section.items.push(item);
+      await saveDb();
+      return send(res, 200, { ok: true, item, ...adminPayload() });
+    }
+
+    if (req.method === "DELETE" && pathname.startsWith("/api/admin/videos/")) {
+      const parts = pathname.split("/");
+      const courseId = parts[4];
+      const itemId = parts[5];
+      if (!courseId || !itemId || !removeVideo(courseId, itemId)) {
+        return send(res, 404, { error: "Видео не найдено" });
+      }
+      await saveDb();
+      return send(res, 200, { ok: true, ...adminPayload() });
+    }
+
+    if (req.method === "POST" && pathname === "/api/admin/upload") {
+      const buffer = await readRawBody(req);
+      if (!buffer.length) return send(res, 400, { error: "Пустой файл" });
+      const fileName = safeMediaName(req.headers["x-filename"] || "video.mp4");
+      const contentType = String(req.headers["content-type"] || "video/mp4").split(";")[0].trim();
+      const src = await storeMediaFile(fileName, buffer, contentType);
+      return send(res, 200, { ok: true, src, fileName });
     }
 
     if (req.method === "PUT" && pathname === "/api/admin/settings") {
@@ -631,7 +889,7 @@ async function handleApi(req, res, url) {
         db.settings.adminPassword = hashPassword(String(body.adminPassword));
       }
       await saveDb();
-      return send(res, 200, { ok: true, settings: billing() });
+      return send(res, 200, { ok: true, settings: billing(), ...adminPayload() });
     }
 
     return send(res, 404, { error: "Не найдено" });

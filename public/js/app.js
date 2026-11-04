@@ -690,14 +690,44 @@ function adminScreen() {
   if (!state.adminAuthed) {
     return `<section class="screen"><button class="back" type="button" data-action="show-login">${svg("chevron")} К входу</button><h1>Админ-панель</h1><p class="small muted">Подтверждение оплаты по почте пользователя.</p><label class="field"><span>Пароль</span><input id="admin-pass" type="password" /></label><button class="btn-solid" type="button" data-action="admin-login">Войти</button></section>`;
   }
-  const data = state.admin || { requests: [], settings: {}, access: [] };
+  const data = state.admin || { requests: [], settings: {}, access: [], courses: [], videos: [] };
   const settings = data.settings || {};
+  const courses = data.courses || [];
+  const videos = data.videos || [];
   const statusText = { pending: "⏳ Ожидает проверки", approved: "✅ Доступ открыт", rejected: "Отклонено" };
-  return `<section class="screen"><div class="row"><h1 style="margin:0">Заявки</h1><button class="tiny" type="button" data-action="admin-out">Выйти</button></div>
+  const courseOptions = courses.map((course) => `<option value="${esc(course.id)}">${esc(course.title)}</option>`).join("");
+  return `<section class="screen"><div class="row"><h1 style="margin:0">Админ</h1><button class="tiny" type="button" data-action="admin-out">Выйти</button></div>
+
+    <h2>Курсы</h2>
+    ${courses.length ? courses.map((course) => `<article class="admin-card"><div class="row"><b>${esc(course.title)}</b><button class="tiny danger" type="button" data-action="delete-course" data-id="${esc(course.id)}">Удалить</button></div><div class="small muted">${esc(course.subtitle || "")}</div><div class="small">${(course.sections || []).map((section) => `${esc(section.title)}: ${section.items}`).join(" · ")}</div></article>`).join("") : `<div class="card muted">Курсов пока нет.</div>`}
+    <div class="card" style="margin-top:12px">
+      <b>Добавить курс</b>
+      <label class="field"><span>Название</span><input id="course-title" placeholder="Например, Новый курс" /></label>
+      <label class="field"><span>Подзаголовок</span><input id="course-subtitle" placeholder="Кратко о чём курс" /></label>
+      <label class="field"><span>Цена, ₸</span><input id="course-price" type="number" min="0" value="29000" /></label>
+      <label class="field"><span>Бейдж</span><input id="course-badge" value="Новый" /></label>
+      <button class="btn-solid" type="button" data-action="add-course">Создать курс</button>
+    </div>
+
+    <h2>Видео</h2>
+    ${videos.length ? videos.map((video) => `<article class="admin-card"><div class="row"><b>${esc(video.title)}</b><button class="tiny danger" type="button" data-action="delete-video" data-course="${esc(video.courseId)}" data-id="${esc(video.id)}">Удалить</button></div><div class="small">${esc(video.courseTitle)} · ${esc(video.sectionTitle)} · ${video.minutes || "?"} мин</div><div class="small muted" style="word-break:break-all">${esc(video.src || "")}</div></article>`).join("") : `<div class="card muted">Видеоуроков пока нет.</div>`}
+    <div class="card" style="margin-top:12px">
+      <b>Добавить видео</b>
+      <label class="field"><span>Курс</span><select id="video-course">${courseOptions || "<option value=\"\">Сначала создайте курс</option>"}</select></label>
+      <label class="field"><span>Название</span><input id="video-title" placeholder="Название урока" /></label>
+      <label class="field"><span>Длительность, мин</span><input id="video-minutes" type="number" min="1" value="8" /></label>
+      <label class="field"><span>Текст под видео</span><textarea id="video-text" rows="3" placeholder="Каждый абзац с новой строки"></textarea></label>
+      <label class="field"><span>Ссылка на mp4 (если уже есть)</span><input id="video-url" placeholder="https://…/video.mp4" /></label>
+      <label class="field"><span>Или файл с телефона / компьютера</span><input id="video-file" type="file" accept="video/mp4,video/webm,video/quicktime" /></label>
+      <p class="small muted">На Vercel лучше файл до ~4 МБ или внешняя ссылка. Локально можно загружать больше.</p>
+      <button class="btn-solid" type="button" data-action="add-video">Добавить видео</button>
+    </div>
+
+    <h2>Заявки</h2>
     ${(data.requests || []).length ? data.requests.map((request) => `<article class="admin-card"><div class="row"><b>${esc(request.name)}</b><span class="${request.status === "pending" ? "badge-wait" : request.status === "approved" ? "badge-ok" : "badge-no"}">${statusText[request.status] || request.status}</span></div><div class="small">${esc(request.email)}</div><div class="small">${esc(request.tariffTitle)} · ${money(request.amount)}</div><div class="small muted">${new Date(request.createdAt).toLocaleString("ru-RU")}</div>${request.note ? `<p class="small">${esc(request.note)}</p>` : ""}${request.receipt ? `<img alt="Чек" src="${request.receipt}" />` : ""}<div class="btn-row" style="margin-top:8px"><button class="btn-solid" type="button" data-action="approve" data-id="${request.id}">Открыть доступ</button><button class="btn-ghost" type="button" data-action="reject" data-id="${request.id}">Отклонить</button></div></article>`).join("") : `<div class="card muted">Заявок пока нет.</div>`}
     <h2>Выдать доступ по почте</h2>
     <label class="field"><span>E-mail пользователя</span><input id="grant-email" type="email" placeholder="user@mail.com" /></label>
-    <label class="field"><span>Курс</span><select id="grant-course"><option value="intimate">Интимный фитнес</option><option value="kamasutra">Камасутра</option><option value="both">Оба курса</option></select></label>
+    <label class="field"><span>Курс</span><select id="grant-course">${courseOptions}<option value="both">Все курсы</option></select></label>
     <button class="btn-ghost" type="button" data-action="grant">Открыть доступ</button>
     <h2>Реквизиты</h2>
     <p class="small muted">Сейчас стоят примеры. Замените на свои перед боевой оплатой.</p>
@@ -1094,6 +1124,56 @@ async function loadAdmin() {
   state.adminAuthed = true;
 }
 
+async function uploadAdminVideo(file) {
+  const response = await fetch("/api/admin/upload", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: {
+      "Content-Type": file.type || "video/mp4",
+      "X-Filename": file.name || "video.mp4"
+    },
+    body: file
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || "Не удалось загрузить файл");
+  return data.src;
+}
+
+async function addAdminCourse() {
+  const title = document.getElementById("course-title")?.value || "";
+  const subtitle = document.getElementById("course-subtitle")?.value || "";
+  const badge = document.getElementById("course-badge")?.value || "Новый";
+  const price = document.getElementById("course-price")?.value || 0;
+  state.admin = await api("/api/admin/courses", {
+    method: "POST",
+    body: { title, subtitle, badge, price: Number(price) }
+  });
+  toast("Курс создан");
+  render();
+}
+
+async function addAdminVideo() {
+  const courseId = document.getElementById("video-course")?.value || "";
+  const title = document.getElementById("video-title")?.value || "";
+  const minutes = document.getElementById("video-minutes")?.value || 8;
+  const text = document.getElementById("video-text")?.value || "";
+  let src = (document.getElementById("video-url")?.value || "").trim();
+  const file = document.getElementById("video-file")?.files?.[0];
+  if (!courseId) throw new Error("Выберите курс");
+  if (!title.trim()) throw new Error("Укажите название видео");
+  if (file) {
+    toast("Загружаем файл…");
+    src = await uploadAdminVideo(file);
+  }
+  if (!src) throw new Error("Добавьте ссылку или файл");
+  state.admin = await api("/api/admin/videos", {
+    method: "POST",
+    body: { courseId, title, minutes: Number(minutes), text, src }
+  });
+  toast("Видео добавлено");
+  render();
+}
+
 function stopAudio() {
   media.audio.pause();
   media.playing = false;
@@ -1294,22 +1374,33 @@ async function onClick(event) {
       await loadAdmin();
       render();
     } else if (action === "approve" || action === "reject") {
-      await api(`/api/admin/requests/${node.dataset.id}/${action === "approve" ? "approve" : "reject"}`, { method: "POST", body: {} });
-      await loadAdmin();
+      state.admin = await api(`/api/admin/requests/${node.dataset.id}/${action === "approve" ? "approve" : "reject"}`, { method: "POST", body: {} });
       toast(action === "approve" ? "Доступ открыт" : "Заявка отклонена");
       render();
     } else if (action === "grant") {
-      await api("/api/admin/grant", { method: "POST", body: { email: document.getElementById("grant-email").value, courseId: document.getElementById("grant-course").value } });
-      await loadAdmin();
+      state.admin = await api("/api/admin/grant", { method: "POST", body: { email: document.getElementById("grant-email").value, courseId: document.getElementById("grant-course").value } });
       toast("Доступ открыт");
+      render();
+    } else if (action === "add-course") {
+      await addAdminCourse();
+    } else if (action === "delete-course") {
+      if (!confirm("Удалить курс вместе с тарифом и всеми его уроками?")) return;
+      state.admin = await api(`/api/admin/courses/${node.dataset.id}`, { method: "DELETE" });
+      toast("Курс удалён");
+      render();
+    } else if (action === "add-video") {
+      await addAdminVideo();
+    } else if (action === "delete-video") {
+      if (!confirm("Удалить это видео?")) return;
+      state.admin = await api(`/api/admin/videos/${node.dataset.course}/${node.dataset.id}`, { method: "DELETE" });
+      toast("Видео удалено");
       render();
     } else if (action === "save-settings") {
       const body = {};
       ["holder", "bank", "kaspi", "card", "iin", "whatsapp", "adminPassword"].forEach((key) => {
         body[key] = document.getElementById(`set-${key}`).value;
       });
-      await api("/api/admin/settings", { method: "PUT", body });
-      await loadAdmin();
+      state.admin = await api("/api/admin/settings", { method: "PUT", body });
       toast("Реквизиты сохранены");
       render();
     } else if (action === "admin-out") {
