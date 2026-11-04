@@ -509,7 +509,7 @@ function homeScreen() {
       <div class="steps-top"><span>Шагомер</span><span>${num(state.local.stepGoal)} цель</span></div>
       <div class="step-num">${num(steps)}</div>
       <div>шагов за день</div>
-      <div class="btn-row" style="margin-top:14px"><button class="btn-soft" type="button" data-action="sheet" data-sheet="steps">Внести шаги</button><button class="btn-soft" type="button" data-action="sheet" data-sheet="sync">Синхронизация</button></div>
+      <div class="btn-row" style="margin-top:14px"><button class="btn-soft" type="button" data-action="sheet" data-sheet="steps">Внести шаги</button></div>
     </div>
     <h2>Мои замеры</h2>
     <div class="card">
@@ -899,9 +899,6 @@ function sheetHtml() {
   if (state.sheet === "steps") {
     const steps = state.local.steps[state.selectedDate] || "";
     return `<div class="backdrop" data-action="close-sheet"><form class="sheet" data-action="save-steps"><div class="grab"></div><h2>Шаги за ${formatRu(state.selectedDate)}</h2><label class="field"><span>Количество</span><input id="step-count" type="number" min="0" max="200000" value="${steps}" /></label><label class="field"><span>Цель на день</span><input id="step-goal" type="number" min="0" value="${state.local.stepGoal}" /></label><button class="btn-solid" type="submit">Сохранить</button></form></div>`;
-  }
-  if (state.sheet === "sync") {
-    return `<div class="backdrop" data-action="close-sheet"><div class="sheet"><div class="grab"></div><h2>Apple Health и Google Fit</h2><p class="small">Браузер не может сам забрать шаги из «Здоровья» или Google Fit: у сайтов нет такого разрешения. Откройте шагомер на телефоне и впишите число за день — G-FIT его сохранит, и вы сможете поправить его позже.</p><button class="btn-solid" type="button" data-action="sheet" data-sheet="steps">Внести шаги вручную</button></div></div>`;
   }
   if (state.sheet === "measure") {
     return `<div class="backdrop" data-action="close-sheet"><form class="sheet" data-action="save-measure"><div class="grab"></div><h2>Внести замеры</h2><label class="field"><span>Дата</span><input id="m-date" type="date" value="${state.selectedDate}" /></label><div class="grid-2"><label class="field"><span>Талия, см</span><input id="m-waist" type="number" step="0.1" /></label><label class="field"><span>Бёдра, см</span><input id="m-hips" type="number" step="0.1" /></label><label class="field"><span>Грудь, см</span><input id="m-chest" type="number" step="0.1" /></label><label class="field"><span>Нога, см</span><input id="m-leg" type="number" step="0.1" /></label></div><label class="field"><span>Вес, кг — по желанию</span><input id="m-weight" type="number" step="0.1" placeholder="можно не заполнять" /></label><button class="btn-solid" type="submit">Сохранить</button></form></div>`;

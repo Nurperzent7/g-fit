@@ -1,4 +1,4 @@
-const CACHE = "gfit-v8";
+const CACHE = "gfit-v9";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(["/", "/index.html", "/css/app.css", "/js/app.js", "/manifest.webmanifest"])));
