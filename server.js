@@ -257,6 +257,46 @@ function safeMediaName(name) {
   return `${Date.now()}-${crypto.randomBytes(3).toString("hex")}${finalExt}`;
 }
 
+function youtubeId(input) {
+  const raw = String(input || "").trim();
+  if (!raw) return "";
+  if (/^[\w-]{11}$/.test(raw)) return raw;
+  try {
+    const url = new URL(raw);
+    const host = url.hostname.replace(/^www\./i, "").toLowerCase();
+    if (host === "youtu.be") {
+      return (url.pathname.split("/").filter(Boolean)[0] || "").slice(0, 11);
+    }
+    if (host === "youtube.com" || host === "m.youtube.com" || host === "music.youtube.com" || host === "youtube-nocookie.com") {
+      const fromQuery = url.searchParams.get("v");
+      if (fromQuery && /^[\w-]{11}$/.test(fromQuery)) return fromQuery;
+      const parts = url.pathname.split("/").filter(Boolean);
+      if (["embed", "shorts", "live", "v"].includes(parts[0]) && /^[\w-]{11}$/.test(parts[1] || "")) {
+        return parts[1];
+      }
+    }
+  } catch {
+    return "";
+  }
+  return "";
+}
+
+function normalizeVideoSrc(input) {
+  const raw = String(input || "").trim();
+  const yt = youtubeId(raw);
+  if (yt) {
+    return {
+      src: `https://www.youtube.com/watch?v=${yt}`,
+      provider: "youtube",
+      youtubeId: yt
+    };
+  }
+  if (raw.startsWith("/api/media/") || /^https?:\/\//i.test(raw)) {
+    return { src: raw, provider: "file" };
+  }
+  return null;
+}
+
 function readRawBody(req, limit = 45_000_000) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -836,12 +876,12 @@ async function handleApi(req, res, url) {
       const course = findCourse(body.courseId);
       if (!course) return send(res, 404, { error: "Курс не найден" });
       const title = String(body.title || "").trim().slice(0, 120);
-      const src = String(body.src || "").trim();
       const minutes = Math.max(1, Math.round(Number(body.minutes) || 5));
       const text = String(body.text || "").trim().slice(0, 2000);
       if (!title) return send(res, 400, { error: "Укажите название видео" });
-      if (!src || (!src.startsWith("/api/media/") && !/^https?:\/\//i.test(src))) {
-        return send(res, 400, { error: "Нужна ссылка на видео или загруженный файл" });
+      const media = normalizeVideoSrc(body.src);
+      if (!media) {
+        return send(res, 400, { error: "Нужна ссылка YouTube, mp4 или загруженный файл" });
       }
       const section = ensureVideosSection(course);
       if (!Array.isArray(section.items)) section.items = [];
@@ -851,7 +891,9 @@ async function handleApi(req, res, url) {
         title,
         minutes,
         count: 1,
-        src,
+        src: media.src,
+        provider: media.provider,
+        ...(media.youtubeId ? { youtubeId: media.youtubeId } : {}),
         paragraphs: text ? text.split(/\n+/).map((line) => line.trim()).filter(Boolean).slice(0, 12) : []
       };
       section.items.push(item);

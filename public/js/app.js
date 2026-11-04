@@ -580,13 +580,42 @@ function gamesScreen(section) {
   </section>`;
 }
 
+function youtubeId(input) {
+  const raw = String(input || "").trim();
+  if (!raw) return "";
+  if (/^[\w-]{11}$/.test(raw)) return raw;
+  try {
+    const url = new URL(raw);
+    const host = url.hostname.replace(/^www\./i, "").toLowerCase();
+    if (host === "youtu.be") return (url.pathname.split("/").filter(Boolean)[0] || "").slice(0, 11);
+    if (["youtube.com", "m.youtube.com", "music.youtube.com", "youtube-nocookie.com"].includes(host)) {
+      const fromQuery = url.searchParams.get("v");
+      if (fromQuery && /^[\w-]{11}$/.test(fromQuery)) return fromQuery;
+      const parts = url.pathname.split("/").filter(Boolean);
+      if (["embed", "shorts", "live", "v"].includes(parts[0]) && /^[\w-]{11}$/.test(parts[1] || "")) return parts[1];
+    }
+  } catch {
+    return "";
+  }
+  return "";
+}
+
+function videoStageHtml(item) {
+  const yt = item.youtubeId || youtubeId(item.src);
+  if (yt || item.provider === "youtube") {
+    const id = yt || youtubeId(item.src);
+    return `<div class="stage yt"><iframe id="lesson-video" title="${esc(item.title)}" src="https://www.youtube.com/embed/${esc(id)}?rel=0&modestbranding=1&playsinline=1" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe><div class="wm">${esc(state.user.email)}</div></div><p class="small muted" style="margin-top:8px">Скорость смотрите в плеере YouTube.</p>`;
+  }
+  return `<div class="stage"><video id="lesson-video" controls playsinline controlsList="nodownload" disablepictureinpicture src="${esc(item.src)}"></video><div class="wm">${esc(state.user.email)}</div></div>${speedsHtml()}`;
+}
+
 function lessonScreen() {
   const { course, item } = currentLocation();
   if (!course || course.locked || !item) return tariffsScreen();
   const paragraphs = (item.paragraphs || []).map((paragraph) => `<p>${esc(paragraph)}</p>`).join("");
   let body = "";
   if (item.type === "video") {
-    body += `<div class="stage"><video id="lesson-video" controls playsinline controlsList="nodownload" disablepictureinpicture src="${esc(item.src)}"></video><div class="wm">${esc(state.user.email)}</div></div>${speedsHtml()}`;
+    body += videoStageHtml(item);
   }
   if (item.type === "audio") {
     body += `<div class="card player-panel"><b>Аудио-практика</b><p class="small muted">Можно выключить экран — звук продолжится.</p><button class="btn-solid" id="audio-btn" type="button" data-action="audio-toggle">Слушать</button>${speedsHtml()}<div class="small" id="audio-time">0:00</div></div>`;
@@ -717,9 +746,9 @@ function adminScreen() {
       <label class="field"><span>Название</span><input id="video-title" placeholder="Название урока" /></label>
       <label class="field"><span>Длительность, мин</span><input id="video-minutes" type="number" min="1" value="8" /></label>
       <label class="field"><span>Текст под видео</span><textarea id="video-text" rows="3" placeholder="Каждый абзац с новой строки"></textarea></label>
-      <label class="field"><span>Ссылка на mp4 (если уже есть)</span><input id="video-url" placeholder="https://…/video.mp4" /></label>
+      <label class="field"><span>Ссылка YouTube или mp4</span><input id="video-url" placeholder="https://youtu.be/… или https://…/video.mp4" /></label>
       <label class="field"><span>Или файл с телефона / компьютера</span><input id="video-file" type="file" accept="video/mp4,video/webm,video/quicktime" /></label>
-      <p class="small muted">На Vercel лучше файл до ~4 МБ или внешняя ссылка. Локально можно загружать больше.</p>
+      <p class="small muted">Можно вставить обычную ссылку YouTube. Файл на Vercel — до ~4 МБ.</p>
       <button class="btn-solid" type="button" data-action="add-video">Добавить видео</button>
     </div>
 
@@ -901,7 +930,7 @@ function tick() {
 function prepareMedia() {
   const { item } = currentLocation();
   const video = document.getElementById("lesson-video");
-  if (video) {
+  if (video && video.tagName === "VIDEO") {
     video.playbackRate = state.speed;
     video.onerror = () => toast("Видео ещё не загружено на сервер");
   }
@@ -1266,7 +1295,7 @@ async function onClick(event) {
     } else if (action === "speed") {
       state.speed = Number(node.dataset.speed);
       const video = document.getElementById("lesson-video");
-      if (video) video.playbackRate = state.speed;
+      if (video && video.tagName === "VIDEO") video.playbackRate = state.speed;
       media.audio.playbackRate = state.speed;
       document.querySelectorAll("[data-speed]").forEach((button) => button.classList.toggle("on", Number(button.dataset.speed) === state.speed));
     } else if (action === "timer-toggle") {
