@@ -1758,7 +1758,15 @@ window.addEventListener("beforeinstallprompt", (event) => {
 });
 
 if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("/sw.js").catch(() => {});
+  navigator.serviceWorker.register("/sw.js?v=11").then((reg) => {
+    if (reg.waiting) reg.waiting.postMessage({ type: "SKIP_WAITING" });
+    reg.update().catch(() => {});
+  }).catch(() => {});
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (sessionStorage.getItem("gfit_reloaded") === "1") return;
+    sessionStorage.setItem("gfit_reloaded", "1");
+    location.reload();
+  });
 }
 
 async function boot() {
