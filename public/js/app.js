@@ -48,6 +48,8 @@ const state = {
   gameKind: "",
   adminAuthed: false,
   admin: null,
+  adminCourseId: "",
+  adminSectionId: "",
   busy: false,
   confirm: null
 };
@@ -715,6 +717,88 @@ function tariffsScreen() {
   </section>`;
 }
 
+function adminSectionKind(section) {
+  if (!section) return "article";
+  if (section.kind === "games") return "games";
+  if (section.id === "recipes") return "recipe";
+  if (section.id === "poses") return "pose";
+  if (section.id === "meditations") return "audio";
+  if (["videos", "lectures", "workouts"].includes(section.id)) return "video";
+  return "article";
+}
+
+function adminMaterialForm(course, section) {
+  if (!course || !section) return "";
+  const kind = adminSectionKind(section);
+  const items = section.items || [];
+  const list = items.length
+    ? items.map((item) => `<article class="admin-card"><div class="row"><b>${esc(item.title)}</b><button class="tiny danger" type="button" data-action="delete-item" data-course="${esc(course.id)}" data-id="${esc(item.id)}">Удалить</button></div><div class="small muted">${esc(item.type || "")}${item.minutes ? ` · ${item.minutes} мин` : ""}${item.src ? ` · ${esc(item.src)}` : ""}</div></article>`).join("")
+    : `<p class="small muted">В «${esc(section.title)}» пока нет материалов. Добавьте ниже.</p>`;
+
+  if (kind === "games") {
+    return `${list}<p class="small muted" style="margin-top:12px">Игры уже встроены в курс. Новые карточки здесь пока не редактируются.</p>`;
+  }
+
+  if (kind === "video") {
+    return `${list}
+    <div class="card" style="margin-top:12px">
+      <b>Добавить в «${esc(section.title)}»</b>
+      <label class="field"><span>Название</span><input id="item-title" placeholder="Название материала" /></label>
+      <label class="field"><span>Длительность, мин</span><input id="item-minutes" type="number" min="1" value="8" /></label>
+      <label class="field"><span>Ссылка YouTube или mp4</span><input id="item-url" placeholder="https://youtu.be/… или https://…/video.mp4" /></label>
+      <label class="field"><span>Или файл с телефона / компьютера</span><input id="item-file" type="file" accept="video/mp4,video/webm,video/quicktime" /></label>
+      <label class="field"><span>Текст под видео</span><textarea id="item-text" rows="3" placeholder="Каждый абзац с новой строки"></textarea></label>
+      <p class="small muted">Можно вставить обычную ссылку YouTube — ученик увидит встроенный плеер.</p>
+      <button class="btn-solid" type="button" data-action="add-item" data-type="video">Добавить в «${esc(section.title)}»</button>
+    </div>`;
+  }
+
+  if (kind === "recipe") {
+    return `${list}
+    <div class="card" style="margin-top:12px">
+      <b>Добавить в «${esc(section.title)}»</b>
+      <label class="field"><span>Название</span><input id="item-title" placeholder="Название материала" /></label>
+      <label class="field"><span>Время</span><input id="item-time" placeholder="15 минут" /></label>
+      <label class="field"><span>Состав, каждый с новой строки</span><textarea id="item-ingredients" rows="3" placeholder="40 г овсянки&#10;200 мл молока"></textarea></label>
+      <label class="field"><span>Шаги, каждый с новой строки</span><textarea id="item-steps" rows="3" placeholder="Сварите хлопья&#10;Добавьте ягоды"></textarea></label>
+      <button class="btn-solid" type="button" data-action="add-item" data-type="recipe">Добавить в «${esc(section.title)}»</button>
+    </div>`;
+  }
+
+  if (kind === "pose") {
+    return `${list}
+    <div class="card" style="margin-top:12px">
+      <b>Добавить в «${esc(section.title)}»</b>
+      <label class="field"><span>Название</span><input id="item-title" placeholder="Название позы" /></label>
+      <label class="field"><span>Уровень</span><input id="item-level" value="Мягко" /></label>
+      <label class="field"><span>Описание</span><textarea id="item-text" rows="3" placeholder="Кратко о позе"></textarea></label>
+      <label class="field"><span>Советы, каждый с новой строки</span><textarea id="item-tips" rows="3"></textarea></label>
+      <button class="btn-solid" type="button" data-action="add-item" data-type="pose">Добавить в «${esc(section.title)}»</button>
+    </div>`;
+  }
+
+  if (kind === "audio") {
+    return `${list}
+    <div class="card" style="margin-top:12px">
+      <b>Добавить в «${esc(section.title)}»</b>
+      <label class="field"><span>Название</span><input id="item-title" placeholder="Название практики" /></label>
+      <label class="field"><span>Длительность, мин</span><input id="item-minutes" type="number" min="1" value="7" /></label>
+      <label class="field"><span>Ссылка на аудио (необязательно)</span><input id="item-url" placeholder="/api/media/ambient.wav" /></label>
+      <label class="field"><span>Текст</span><textarea id="item-text" rows="3"></textarea></label>
+      <button class="btn-solid" type="button" data-action="add-item" data-type="audio">Добавить в «${esc(section.title)}»</button>
+    </div>`;
+  }
+
+  return `${list}
+  <div class="card" style="margin-top:12px">
+    <b>Добавить в «${esc(section.title)}»</b>
+    <label class="field"><span>Название</span><input id="item-title" placeholder="Название материала" /></label>
+    <label class="field"><span>Минуты чтения</span><input id="item-minutes" type="number" min="1" value="4" /></label>
+    <label class="field"><span>Текст, каждый абзац с новой строки</span><textarea id="item-text" rows="4"></textarea></label>
+    <button class="btn-solid" type="button" data-action="add-item" data-type="article">Добавить в «${esc(section.title)}»</button>
+  </div>`;
+}
+
 function adminScreen() {
   if (!state.adminAuthed) {
     return `<section class="screen"><button class="back" type="button" data-action="show-login">${svg("chevron")} К входу</button><h1>Админ-панель</h1><p class="small muted">Подтверждение оплаты по почте пользователя.</p><label class="field"><span>Пароль</span><input id="admin-pass" type="password" /></label><button class="btn-solid" type="button" data-action="admin-login">Войти</button></section>`;
@@ -722,13 +806,18 @@ function adminScreen() {
   const data = state.admin || { requests: [], settings: {}, access: [], courses: [], videos: [] };
   const settings = data.settings || {};
   const courses = data.courses || [];
-  const videos = data.videos || [];
+  if (!state.adminCourseId && courses[0]) state.adminCourseId = courses[0].id;
+  const course = courses.find((item) => item.id === state.adminCourseId) || courses[0] || null;
+  if (course && !course.sections?.some((section) => section.id === state.adminSectionId)) {
+    state.adminSectionId = course.sections?.[0]?.id || "";
+  }
+  const section = course?.sections?.find((item) => item.id === state.adminSectionId) || course?.sections?.[0] || null;
   const statusText = { pending: "⏳ Ожидает проверки", approved: "✅ Доступ открыт", rejected: "Отклонено" };
-  const courseOptions = courses.map((course) => `<option value="${esc(course.id)}">${esc(course.title)}</option>`).join("");
+  const courseOptions = courses.map((item) => `<option value="${esc(item.id)}">${esc(item.title)}</option>`).join("");
   return `<section class="screen"><div class="row"><h1 style="margin:0">Админ</h1><button class="tiny" type="button" data-action="admin-out">Выйти</button></div>
 
     <h2>Курсы</h2>
-    ${courses.length ? courses.map((course) => `<article class="admin-card"><div class="row"><b>${esc(course.title)}</b><button class="tiny danger" type="button" data-action="delete-course" data-id="${esc(course.id)}">Удалить</button></div><div class="small muted">${esc(course.subtitle || "")}</div><div class="small">${(course.sections || []).map((section) => `${esc(section.title)}: ${section.items}`).join(" · ")}</div></article>`).join("") : `<div class="card muted">Курсов пока нет.</div>`}
+    ${courses.length ? courses.map((item) => `<article class="admin-card ${item.id === course?.id ? "on" : ""}"><div class="row"><button class="linkish" type="button" data-action="admin-course" data-id="${esc(item.id)}"><b>${esc(item.title)}</b></button><button class="tiny danger" type="button" data-action="delete-course" data-id="${esc(item.id)}">Удалить</button></div><div class="small muted">${esc(item.subtitle || "")}</div><div class="small">${esc(item.badge || "Курс")}</div></article>`).join("") : `<div class="card muted">Курсов пока нет.</div>`}
     <div class="card" style="margin-top:12px">
       <b>Добавить курс</b>
       <label class="field"><span>Название</span><input id="course-title" placeholder="Например, Новый курс" /></label>
@@ -738,19 +827,11 @@ function adminScreen() {
       <button class="btn-solid" type="button" data-action="add-course">Создать курс</button>
     </div>
 
-    <h2>Видео</h2>
-    ${videos.length ? videos.map((video) => `<article class="admin-card"><div class="row"><b>${esc(video.title)}</b><button class="tiny danger" type="button" data-action="delete-video" data-course="${esc(video.courseId)}" data-id="${esc(video.id)}">Удалить</button></div><div class="small">${esc(video.courseTitle)} · ${esc(video.sectionTitle)} · ${video.minutes || "?"} мин</div><div class="small muted" style="word-break:break-all">${esc(video.src || "")}</div></article>`).join("") : `<div class="card muted">Видеоуроков пока нет.</div>`}
-    <div class="card" style="margin-top:12px">
-      <b>Добавить видео</b>
-      <label class="field"><span>Курс</span><select id="video-course">${courseOptions || "<option value=\"\">Сначала создайте курс</option>"}</select></label>
-      <label class="field"><span>Название</span><input id="video-title" placeholder="Название урока" /></label>
-      <label class="field"><span>Длительность, мин</span><input id="video-minutes" type="number" min="1" value="8" /></label>
-      <label class="field"><span>Текст под видео</span><textarea id="video-text" rows="3" placeholder="Каждый абзац с новой строки"></textarea></label>
-      <label class="field"><span>Ссылка YouTube или mp4</span><input id="video-url" placeholder="https://youtu.be/… или https://…/video.mp4" /></label>
-      <label class="field"><span>Или файл с телефона / компьютера</span><input id="video-file" type="file" accept="video/mp4,video/webm,video/quicktime" /></label>
-      <p class="small muted">Можно вставить обычную ссылку YouTube. Файл на Vercel — до ~4 МБ.</p>
-      <button class="btn-solid" type="button" data-action="add-video">Добавить видео</button>
-    </div>
+    ${course ? `<h2>Материалы курса</h2>
+    <article class="admin-card"><b>${esc(course.title)}</b><div class="small muted">${esc(course.subtitle || "")}</div><div class="small">${esc(course.badge || "Готовый")}</div>
+      <div class="admin-chips">${(course.sections || []).map((item) => `<button class="admin-chip ${item.id === section?.id ? "on" : ""}" type="button" data-action="admin-section" data-id="${esc(item.id)}">${esc(item.title)}</button>`).join("")}</div>
+      ${adminMaterialForm(course, section)}
+    </article>` : ""}
 
     <h2>Заявки</h2>
     ${(data.requests || []).length ? data.requests.map((request) => `<article class="admin-card"><div class="row"><b>${esc(request.name)}</b><span class="${request.status === "pending" ? "badge-wait" : request.status === "approved" ? "badge-ok" : "badge-no"}">${statusText[request.status] || request.status}</span></div><div class="small">${esc(request.email)}</div><div class="small">${esc(request.tariffTitle)} · ${money(request.amount)}</div><div class="small muted">${new Date(request.createdAt).toLocaleString("ru-RU")}</div>${request.note ? `<p class="small">${esc(request.note)}</p>` : ""}${request.receipt ? `<img alt="Чек" src="${request.receipt}" />` : ""}<div class="btn-row" style="margin-top:8px"><button class="btn-solid" type="button" data-action="approve" data-id="${request.id}">Открыть доступ</button><button class="btn-ghost" type="button" data-action="reject" data-id="${request.id}">Отклонить</button></div></article>`).join("") : `<div class="card muted">Заявок пока нет.</div>`}
@@ -1181,25 +1262,37 @@ async function addAdminCourse() {
   render();
 }
 
-async function addAdminVideo() {
-  const courseId = document.getElementById("video-course")?.value || "";
-  const title = document.getElementById("video-title")?.value || "";
-  const minutes = document.getElementById("video-minutes")?.value || 8;
-  const text = document.getElementById("video-text")?.value || "";
-  let src = (document.getElementById("video-url")?.value || "").trim();
-  const file = document.getElementById("video-file")?.files?.[0];
-  if (!courseId) throw new Error("Выберите курс");
-  if (!title.trim()) throw new Error("Укажите название видео");
-  if (file) {
-    toast("Загружаем файл…");
-    src = await uploadAdminVideo(file);
+async function addAdminItem(type) {
+  const courseId = state.adminCourseId;
+  const sectionId = state.adminSectionId;
+  if (!courseId || !sectionId) throw new Error("Выберите курс и раздел");
+  const title = document.getElementById("item-title")?.value || "";
+  if (!title.trim()) throw new Error("Укажите название");
+  const body = {
+    courseId,
+    sectionId,
+    type,
+    title,
+    minutes: Number(document.getElementById("item-minutes")?.value || 5),
+    time: document.getElementById("item-time")?.value || "",
+    text: document.getElementById("item-text")?.value || "",
+    ingredients: document.getElementById("item-ingredients")?.value || "",
+    steps: document.getElementById("item-steps")?.value || "",
+    tips: document.getElementById("item-tips")?.value || "",
+    level: document.getElementById("item-level")?.value || "",
+    intro: document.getElementById("item-intro")?.value || "",
+    src: (document.getElementById("item-url")?.value || "").trim()
+  };
+  if (type === "video") {
+    const file = document.getElementById("item-file")?.files?.[0];
+    if (file) {
+      toast("Загружаем файл…");
+      body.src = await uploadAdminVideo(file);
+    }
+    if (!body.src) throw new Error("Добавьте ссылку YouTube, mp4 или файл");
   }
-  if (!src) throw new Error("Добавьте ссылку или файл");
-  state.admin = await api("/api/admin/videos", {
-    method: "POST",
-    body: { courseId, title, minutes: Number(minutes), text, src }
-  });
-  toast("Видео добавлено");
+  state.admin = await api("/api/admin/items", { method: "POST", body });
+  toast("Материал добавлен");
   render();
 }
 
@@ -1412,17 +1505,28 @@ async function onClick(event) {
       render();
     } else if (action === "add-course") {
       await addAdminCourse();
+    } else if (action === "admin-course") {
+      state.adminCourseId = node.dataset.id;
+      state.adminSectionId = "";
+      render();
+    } else if (action === "admin-section") {
+      state.adminSectionId = node.dataset.id;
+      render();
     } else if (action === "delete-course") {
       if (!confirm("Удалить курс вместе с тарифом и всеми его уроками?")) return;
       state.admin = await api(`/api/admin/courses/${node.dataset.id}`, { method: "DELETE" });
+      if (state.adminCourseId === node.dataset.id) {
+        state.adminCourseId = state.admin.courses?.[0]?.id || "";
+        state.adminSectionId = "";
+      }
       toast("Курс удалён");
       render();
-    } else if (action === "add-video") {
-      await addAdminVideo();
-    } else if (action === "delete-video") {
-      if (!confirm("Удалить это видео?")) return;
-      state.admin = await api(`/api/admin/videos/${node.dataset.course}/${node.dataset.id}`, { method: "DELETE" });
-      toast("Видео удалено");
+    } else if (action === "add-item") {
+      await addAdminItem(node.dataset.type || "article");
+    } else if (action === "delete-item" || action === "delete-video") {
+      if (!confirm("Удалить этот материал?")) return;
+      state.admin = await api(`/api/admin/items/${node.dataset.course}/${node.dataset.id}`, { method: "DELETE" });
+      toast("Удалено");
       render();
     } else if (action === "save-settings") {
       const body = {};

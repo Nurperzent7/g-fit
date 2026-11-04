@@ -238,7 +238,7 @@ function listVideos() {
   return rows;
 }
 
-function removeVideo(courseId, itemId) {
+function removeItem(courseId, itemId) {
   const course = findCourse(courseId);
   if (!course) return false;
   for (const section of course.sections || []) {
@@ -247,6 +247,24 @@ function removeVideo(courseId, itemId) {
     if (section.items.length !== before) return true;
   }
   return false;
+}
+
+function removeVideo(courseId, itemId) {
+  return removeItem(courseId, itemId);
+}
+
+function findSection(course, sectionId) {
+  return (course.sections || []).find((section) => section.id === sectionId) || null;
+}
+
+function sectionFormKind(section) {
+  if (!section) return "article";
+  if (section.kind === "games") return "games";
+  if (section.id === "recipes") return "recipe";
+  if (section.id === "poses") return "pose";
+  if (section.id === "meditations") return "audio";
+  if (section.id === "videos" || section.id === "lectures" || section.id === "workouts") return "video";
+  return "article";
 }
 
 function safeMediaName(name) {
@@ -445,7 +463,19 @@ function adminPayload() {
       sections: (course.sections || []).map((section) => ({
         id: section.id,
         title: section.title,
-        items: (section.items || []).length
+        icon: section.icon,
+        kind: section.kind || "list",
+        items: section.kind === "games"
+          ? []
+          : (section.items || []).map((item) => ({
+              id: item.id,
+              type: item.type,
+              title: item.title,
+              minutes: item.minutes,
+              src: item.src || "",
+              provider: item.provider || "",
+              youtubeId: item.youtubeId || ""
+            }))
       }))
     })),
     tariffs: tariffList(),
@@ -883,7 +913,7 @@ async function handleApi(req, res, url) {
       if (!media) {
         return send(res, 400, { error: "Нужна ссылка YouTube, mp4 или загруженный файл" });
       }
-      const section = ensureVideosSection(course);
+      const section = (body.sectionId && findSection(course, body.sectionId)) || ensureVideosSection(course);
       if (!Array.isArray(section.items)) section.items = [];
       const item = {
         id: uid("v"),
@@ -901,12 +931,95 @@ async function handleApi(req, res, url) {
       return send(res, 200, { ok: true, item, ...adminPayload() });
     }
 
+    if (req.method === "POST" && pathname === "/api/admin/items") {
+      const body = await readBody(req);
+      const course = findCourse(body.courseId);
+      if (!course) return send(res, 404, { error: "Курс не найден" });
+      const section = findSection(course, body.sectionId);
+      if (!section || section.kind === "games") {
+        return send(res, 400, { error: "Выберите раздел курса" });
+      }
+      if (!Array.isArray(section.items)) section.items = [];
+      const title = String(body.title || "").trim().slice(0, 120);
+      if (!title) return send(res, 400, { error: "Укажите название" });
+      const kind = String(body.type || sectionFormKind(section));
+      let item = null;
+      if (kind === "video") {
+        const media = normalizeVideoSrc(body.src);
+        if (!media) return send(res, 400, { error: "Нужна ссылка YouTube, mp4 или файл" });
+        const text = String(body.text || "").trim().slice(0, 2000);
+        item = {
+          id: uid("v"),
+          type: "video",
+          title,
+          minutes: Math.max(1, Math.round(Number(body.minutes) || 5)),
+          count: 1,
+          src: media.src,
+          provider: media.provider,
+          ...(media.youtubeId ? { youtubeId: media.youtubeId } : {}),
+          paragraphs: text ? text.split(/\n+/).map((line) => line.trim()).filter(Boolean).slice(0, 12) : []
+        };
+      } else if (kind === "recipe") {
+        item = {
+          id: uid("r"),
+          type: "recipe",
+          title,
+          time: String(body.time || "").trim().slice(0, 40) || "15 минут",
+          ingredients: String(body.ingredients || "").split(/\n+/).map((line) => line.trim()).filter(Boolean).slice(0, 30),
+          steps: String(body.steps || "").split(/\n+/).map((line) => line.trim()).filter(Boolean).slice(0, 30)
+        };
+      } else if (kind === "pose") {
+        item = {
+          id: uid("p"),
+          type: "pose",
+          title,
+          level: String(body.level || "Мягко").trim().slice(0, 40),
+          summary: String(body.summary || body.text || "").trim().slice(0, 800),
+          tips: String(body.tips || "").split(/\n+/).map((line) => line.trim()).filter(Boolean).slice(0, 12)
+        };
+      } else if (kind === "audio") {
+        const text = String(body.text || "").trim().slice(0, 2000);
+        item = {
+          id: uid("a"),
+          type: "audio",
+          title,
+          minutes: Math.max(1, Math.round(Number(body.minutes) || 5)),
+          src: String(body.src || "/api/media/ambient.wav").trim() || "/api/media/ambient.wav",
+          intro: String(body.intro || "").trim().slice(0, 300),
+          paragraphs: text ? text.split(/\n+/).map((line) => line.trim()).filter(Boolean).slice(0, 12) : []
+        };
+      } else {
+        const text = String(body.text || "").trim().slice(0, 4000);
+        item = {
+          id: uid("t"),
+          type: "article",
+          title,
+          minutes: Math.max(1, Math.round(Number(body.minutes) || 3)),
+          paragraphs: text ? text.split(/\n+/).map((line) => line.trim()).filter(Boolean).slice(0, 20) : []
+        };
+      }
+      section.items.push(item);
+      await saveDb();
+      return send(res, 200, { ok: true, item, ...adminPayload() });
+    }
+
     if (req.method === "DELETE" && pathname.startsWith("/api/admin/videos/")) {
       const parts = pathname.split("/");
       const courseId = parts[4];
       const itemId = parts[5];
-      if (!courseId || !itemId || !removeVideo(courseId, itemId)) {
-        return send(res, 404, { error: "Видео не найдено" });
+      if (!courseId || !itemId || !removeItem(courseId, itemId)) {
+        return send(res, 404, { error: "Материал не найден" });
+      }
+      await saveDb();
+      return send(res, 200, { ok: true, ...adminPayload() });
+    }
+
+    if (req.method === "DELETE" && pathname.startsWith("/api/admin/items/")) {
+      const parts = pathname.split("/");
+      const courseId = parts[4];
+      const itemId = parts[5];
+      if (!courseId || !itemId || !removeItem(courseId, itemId)) {
+        return send(res, 404, { error: "Материал не найден" });
       }
       await saveDb();
       return send(res, 200, { ok: true, ...adminPayload() });

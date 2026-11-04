@@ -406,7 +406,20 @@ h2 { font-size: 20px; margin: 18px 0 10px; }
 }
 .mini-bar b { flex: 1; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .admin-card { background: white; border-radius: 18px; padding: 12px; margin-top: 10px; box-shadow: var(--shadow); }
+.admin-card.on { outline: 2px solid var(--wine); }
 .admin-card img { width: 100%; border-radius: 12px; margin-top: 8px; }
+.admin-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.admin-chip {
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: #f3e7eb;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+}
+.admin-chip.on { background: var(--wine); color: #fff; }
+button.linkish { border: 0; background: none; padding: 0; text-align: left; color: inherit; font: inherit; }
 .game-result { background: var(--wine-soft); border-radius: 18px; padding: 14px; line-height: 1.5; }
 .center { text-align: center; }
 .upload { background: none; border: 0; color: var(--wine); font-weight: 800; display: block; margin: 8px auto 14px; }
