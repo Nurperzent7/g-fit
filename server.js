@@ -115,6 +115,7 @@ function seed() {
         gender: "f",
         avatar: "",
         level: "profi",
+        lang: "ru",
         password: hashPassword("gfit2026"),
         createdAt: today
       }
@@ -146,6 +147,14 @@ function seed() {
   };
 }
 
+function normalizeLang(value) {
+  return value === "kk" ? "kk" : "ru";
+}
+
+function itemLang(item) {
+  return normalizeLang(item?.lang);
+}
+
 function migrate(loaded) {
   let dirty = false;
   if (!Array.isArray(loaded.courses) || !loaded.courses.length) {
@@ -156,6 +165,22 @@ function migrate(loaded) {
     loaded.tariffs = cloneTariffs();
     dirty = true;
   }
+  (loaded.users || []).forEach((user) => {
+    if (user.lang !== "ru" && user.lang !== "kk") {
+      user.lang = "ru";
+      dirty = true;
+    }
+  });
+  (loaded.courses || []).forEach((course) => {
+    (course.sections || []).forEach((section) => {
+      (section.items || []).forEach((item) => {
+        if (item.lang !== "ru" && item.lang !== "kk") {
+          item.lang = "ru";
+          dirty = true;
+        }
+      });
+    });
+  });
   if (loaded.schema !== SCHEMA) {
     loaded.schema = SCHEMA;
     dirty = true;
@@ -385,7 +410,8 @@ function publicUser(user) {
     birth: user.birth,
     gender: user.gender,
     avatar: user.avatar,
-    level: user.level
+    level: user.level,
+    lang: normalizeLang(user.lang)
   };
 }
 
@@ -405,15 +431,30 @@ function hasCourse(email, courseId) {
   });
 }
 
-function viewCourse(course, open) {
+function filterCourseByLang(course, lang) {
+  const wanted = normalizeLang(lang);
+  return {
+    ...course,
+    sections: (course.sections || []).map((section) => {
+      if (section.kind === "games") return { ...section };
+      return {
+        ...section,
+        items: (section.items || []).filter((item) => itemLang(item) === wanted)
+      };
+    })
+  };
+}
+
+function viewCourse(course, open, lang = "ru") {
+  const filtered = filterCourseByLang(course, lang);
   if (!open) {
     return {
-      id: course.id,
-      title: course.title,
-      subtitle: course.subtitle,
-      badge: course.badge,
+      id: filtered.id,
+      title: filtered.title,
+      subtitle: filtered.subtitle,
+      badge: filtered.badge,
       locked: true,
-      sections: course.sections.map((section) => ({
+      sections: filtered.sections.map((section) => ({
         id: section.id,
         title: section.title,
         icon: section.icon,
@@ -421,11 +462,11 @@ function viewCourse(course, open) {
       }))
     };
   }
-  return { ...course, locked: false };
+  return { ...filtered, locked: false };
 }
 
-function catalogFor(email) {
-  return courseList().map((course) => viewCourse(course, hasCourse(email, course.id)));
+function catalogFor(email, lang = "ru") {
+  return courseList().map((course) => viewCourse(course, hasCourse(email, course.id), lang));
 }
 
 function accessFor(email) {
@@ -445,7 +486,7 @@ function mePayload(user) {
     requests: requestsFor(user.email),
     billing: billing(),
     tariffs: tariffList(),
-    catalog: catalogFor(user.email)
+    catalog: catalogFor(user.email, user.lang)
   };
 }
 
@@ -472,6 +513,7 @@ function adminPayload() {
               type: item.type,
               title: item.title,
               minutes: item.minutes,
+              lang: itemLang(item),
               src: item.src || "",
               provider: item.provider || "",
               youtubeId: item.youtubeId || ""
@@ -665,6 +707,7 @@ async function handleApi(req, res, url) {
         gender: "f",
         avatar: "",
         level: "novice",
+        lang: "ru",
         password: hashPassword(password),
         createdAt: iso(new Date())
       };
@@ -715,6 +758,7 @@ async function handleApi(req, res, url) {
       user.birth = String(body.birth ?? user.birth).slice(0, 10);
       user.gender = body.gender === "m" ? "m" : "f";
       user.level = body.level === "novice" ? "novice" : "profi";
+      if (body.lang !== undefined) user.lang = normalizeLang(body.lang);
       user.avatar = avatar;
       user.email = nextEmail;
       if (prevEmail !== nextEmail) {
@@ -921,6 +965,7 @@ async function handleApi(req, res, url) {
         title,
         minutes,
         count: 1,
+        lang: normalizeLang(body.lang),
         src: media.src,
         provider: media.provider,
         ...(media.youtubeId ? { youtubeId: media.youtubeId } : {}),
@@ -943,6 +988,7 @@ async function handleApi(req, res, url) {
       const title = String(body.title || "").trim().slice(0, 120);
       if (!title) return send(res, 400, { error: "Укажите название" });
       const kind = String(body.type || sectionFormKind(section));
+      const lang = normalizeLang(body.lang);
       let item = null;
       if (kind === "video") {
         const media = normalizeVideoSrc(body.src);
@@ -954,6 +1000,7 @@ async function handleApi(req, res, url) {
           title,
           minutes: Math.max(1, Math.round(Number(body.minutes) || 5)),
           count: 1,
+          lang,
           src: media.src,
           provider: media.provider,
           ...(media.youtubeId ? { youtubeId: media.youtubeId } : {}),
@@ -964,6 +1011,7 @@ async function handleApi(req, res, url) {
           id: uid("r"),
           type: "recipe",
           title,
+          lang,
           time: String(body.time || "").trim().slice(0, 40) || "15 минут",
           ingredients: String(body.ingredients || "").split(/\n+/).map((line) => line.trim()).filter(Boolean).slice(0, 30),
           steps: String(body.steps || "").split(/\n+/).map((line) => line.trim()).filter(Boolean).slice(0, 30)
@@ -973,6 +1021,7 @@ async function handleApi(req, res, url) {
           id: uid("p"),
           type: "pose",
           title,
+          lang,
           level: String(body.level || "Мягко").trim().slice(0, 40),
           summary: String(body.summary || body.text || "").trim().slice(0, 800),
           tips: String(body.tips || "").split(/\n+/).map((line) => line.trim()).filter(Boolean).slice(0, 12)
@@ -983,6 +1032,7 @@ async function handleApi(req, res, url) {
           id: uid("a"),
           type: "audio",
           title,
+          lang,
           minutes: Math.max(1, Math.round(Number(body.minutes) || 5)),
           src: String(body.src || "/api/media/ambient.wav").trim() || "/api/media/ambient.wav",
           intro: String(body.intro || "").trim().slice(0, 300),
@@ -994,6 +1044,7 @@ async function handleApi(req, res, url) {
           id: uid("t"),
           type: "article",
           title,
+          lang,
           minutes: Math.max(1, Math.round(Number(body.minutes) || 3)),
           paragraphs: text ? text.split(/\n+/).map((line) => line.trim()).filter(Boolean).slice(0, 20) : []
         };

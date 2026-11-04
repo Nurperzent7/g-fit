@@ -292,6 +292,14 @@ function levelLabel() {
   return state.user?.level === "novice" ? "Новичок" : "Профи";
 }
 
+function currentLang() {
+  return state.user?.lang === "kk" ? "kk" : "ru";
+}
+
+function langLabel(lang = currentLang()) {
+  return lang === "kk" ? "Қазақша" : "Русский";
+}
+
 function avatarHtml(user, large = false) {
   const person = user || state.user || { name: "?" };
   const inner = person.avatar ? `<img alt="" src="${person.avatar}" />` : esc((person.name || "?").slice(0, 1).toUpperCase());
@@ -569,8 +577,10 @@ function sectionScreen() {
   const { course, section } = currentLocation();
   if (!course || course.locked || !section) return tariffsScreen();
   if (section.kind === "games") return gamesScreen(section);
+  const items = section.items || [];
   return `<section class="screen">${backBtn()}${whoBlock("level")}<h1>${esc(section.title)}</h1>
-    ${(section.items || []).map((item) => `<button class="lesson-row" type="button" data-action="lesson" data-id="${item.id}"><b>${esc(item.title)}</b><div class="small muted">${item.level ? esc(item.level) + " · " : ""}${item.minutes || item.time || ""} мин</div></button>`).join("")}
+    <p class="small muted">${langLabel()} сабақтары</p>
+    ${items.length ? items.map((item) => `<button class="lesson-row" type="button" data-action="lesson" data-id="${item.id}"><b>${esc(item.title)}</b><div class="small muted">${item.level ? esc(item.level) + " · " : ""}${item.minutes || item.time || ""} мин</div></button>`).join("") : `<div class="card muted">Бұл тілде әзірге сабақ жоқ. Профильден тілді ауыстырыңыз немесе кейінірек қайта кіріңіз.</div>`}
   </section>`;
 }
 
@@ -651,9 +661,11 @@ function chatScreen() {
 }
 
 function profileScreen() {
+  const lang = currentLang();
   return `<section class="screen">${backBtn()}${whoBlock("mail")}
-    <div class="small muted" style="margin-top:12px">Уровень</div>
-    <div class="seg"><button type="button" class="${state.user.level === "novice" ? "on" : ""}" data-action="level" data-level="novice">Новичок</button><button type="button" class="${state.user.level !== "novice" ? "on" : ""}" data-action="level" data-level="profi">Профи</button></div>
+    <div class="small muted" style="margin-top:12px">Тіл / Язык</div>
+    <div class="seg"><button type="button" class="${lang === "ru" ? "on" : ""}" data-action="lang" data-lang="ru">Русский</button><button type="button" class="${lang === "kk" ? "on" : ""}" data-action="lang" data-lang="kk">Қазақша</button></div>
+    <p class="small muted" style="margin-top:8px">Оқытуда тек таңдалған тілдегі сабақтар көрсетіледі.</p>
     <div class="menu">
       <button class="menu-item card" type="button" data-action="go" data-route="personal">${svg("user")} Личные данные <span>›</span></button>
       <button class="menu-item card" type="button" data-action="go" data-route="subs">${svg("card")} Мои подписки / Покупки <span>›</span></button>
@@ -732,8 +744,10 @@ function adminMaterialForm(course, section) {
   const kind = adminSectionKind(section);
   const items = section.items || [];
   const list = items.length
-    ? items.map((item) => `<article class="admin-card"><div class="row"><b>${esc(item.title)}</b><button class="tiny danger" type="button" data-action="delete-item" data-course="${esc(course.id)}" data-id="${esc(item.id)}">Удалить</button></div><div class="small muted">${esc(item.type || "")}${item.minutes ? ` · ${item.minutes} мин` : ""}${item.src ? ` · ${esc(item.src)}` : ""}</div></article>`).join("")
+    ? items.map((item) => `<article class="admin-card"><div class="row"><b>${esc(item.title)}</b><button class="tiny danger" type="button" data-action="delete-item" data-course="${esc(course.id)}" data-id="${esc(item.id)}">Удалить</button></div><div class="small muted">${esc(item.type || "")} · ${item.lang === "kk" ? "Қазақша" : "Русский"}${item.minutes ? ` · ${item.minutes} мин` : ""}${item.src ? ` · ${esc(item.src)}` : ""}</div></article>`).join("")
     : `<p class="small muted">В «${esc(section.title)}» пока нет материалов. Добавьте ниже.</p>`;
+
+  const langField = `<label class="field"><span>Тіл / Язык урока</span><select id="item-lang"><option value="ru">Русский</option><option value="kk">Қазақша</option></select></label>`;
 
   if (kind === "games") {
     return `${list}<p class="small muted" style="margin-top:12px">Игры уже встроены в курс. Новые карточки здесь пока не редактируются.</p>`;
@@ -743,6 +757,7 @@ function adminMaterialForm(course, section) {
     return `${list}
     <div class="card" style="margin-top:12px">
       <b>Добавить в «${esc(section.title)}»</b>
+      ${langField}
       <label class="field"><span>Название</span><input id="item-title" placeholder="Название материала" /></label>
       <label class="field"><span>Длительность, мин</span><input id="item-minutes" type="number" min="1" value="8" /></label>
       <label class="field"><span>Ссылка YouTube или mp4</span><input id="item-url" placeholder="https://youtu.be/… или https://…/video.mp4" /></label>
@@ -757,6 +772,7 @@ function adminMaterialForm(course, section) {
     return `${list}
     <div class="card" style="margin-top:12px">
       <b>Добавить в «${esc(section.title)}»</b>
+      ${langField}
       <label class="field"><span>Название</span><input id="item-title" placeholder="Название материала" /></label>
       <label class="field"><span>Время</span><input id="item-time" placeholder="15 минут" /></label>
       <label class="field"><span>Состав, каждый с новой строки</span><textarea id="item-ingredients" rows="3" placeholder="40 г овсянки&#10;200 мл молока"></textarea></label>
@@ -769,6 +785,7 @@ function adminMaterialForm(course, section) {
     return `${list}
     <div class="card" style="margin-top:12px">
       <b>Добавить в «${esc(section.title)}»</b>
+      ${langField}
       <label class="field"><span>Название</span><input id="item-title" placeholder="Название позы" /></label>
       <label class="field"><span>Уровень</span><input id="item-level" value="Мягко" /></label>
       <label class="field"><span>Описание</span><textarea id="item-text" rows="3" placeholder="Кратко о позе"></textarea></label>
@@ -781,6 +798,7 @@ function adminMaterialForm(course, section) {
     return `${list}
     <div class="card" style="margin-top:12px">
       <b>Добавить в «${esc(section.title)}»</b>
+      ${langField}
       <label class="field"><span>Название</span><input id="item-title" placeholder="Название практики" /></label>
       <label class="field"><span>Длительность, мин</span><input id="item-minutes" type="number" min="1" value="7" /></label>
       <label class="field"><span>Ссылка на аудио (необязательно)</span><input id="item-url" placeholder="/api/media/ambient.wav" /></label>
@@ -792,6 +810,7 @@ function adminMaterialForm(course, section) {
   return `${list}
   <div class="card" style="margin-top:12px">
     <b>Добавить в «${esc(section.title)}»</b>
+    ${langField}
     <label class="field"><span>Название</span><input id="item-title" placeholder="Название материала" /></label>
     <label class="field"><span>Минуты чтения</span><input id="item-minutes" type="number" min="1" value="4" /></label>
     <label class="field"><span>Текст, каждый абзац с новой строки</span><textarea id="item-text" rows="4"></textarea></label>
@@ -1192,6 +1211,7 @@ async function saveProfile() {
     email: document.getElementById("p-email").value.trim(),
     gender: state.gender,
     level: state.user.level,
+    lang: currentLang(),
     avatar: state.user.avatar
   };
   if (payload.birth && !adultBirth(payload.birth)) {
@@ -1281,6 +1301,7 @@ async function addAdminItem(type) {
     tips: document.getElementById("item-tips")?.value || "",
     level: document.getElementById("item-level")?.value || "",
     intro: document.getElementById("item-intro")?.value || "",
+    lang: document.getElementById("item-lang")?.value || "ru",
     src: (document.getElementById("item-url")?.value || "").trim()
   };
   if (type === "video") {
@@ -1461,6 +1482,11 @@ async function onClick(event) {
     } else if (action === "level") {
       state.user.level = node.dataset.level;
       await api("/api/me", { method: "PUT", body: { ...state.user, level: node.dataset.level } });
+      render();
+    } else if (action === "lang") {
+      const lang = node.dataset.lang === "kk" ? "kk" : "ru";
+      applyPayload(await api("/api/me", { method: "PUT", body: { ...state.user, lang } }));
+      toast(lang === "kk" ? "Қазақша сабақтар" : "Русские уроки");
       render();
     } else if (action === "save-profile") {
       await saveProfile();
