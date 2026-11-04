@@ -292,12 +292,44 @@ function sectionFormKind(section) {
   return "article";
 }
 
-function safeMediaName(name) {
-  const raw = path.basename(String(name || "video.mp4"));
-  const ext = (path.extname(raw) || ".mp4").toLowerCase().replace(/[^\w.]/g, "");
-  const allowed = [".mp4", ".webm", ".mov", ".m4v"];
-  const finalExt = allowed.includes(ext) ? ext : ".mp4";
+function safeMediaName(name, contentType = "") {
+  const raw = path.basename(String(name || "file.bin"));
+  let ext = (path.extname(raw) || "").toLowerCase().replace(/[^\w.]/g, "");
+  if (!ext) {
+    if (contentType.includes("png")) ext = ".png";
+    else if (contentType.includes("webp")) ext = ".webp";
+    else if (contentType.includes("gif")) ext = ".gif";
+    else if (contentType.includes("jpeg") || contentType.includes("jpg")) ext = ".jpg";
+    else if (contentType.includes("webm")) ext = ".webm";
+    else if (contentType.includes("quicktime")) ext = ".mov";
+    else if (contentType.startsWith("image/")) ext = ".jpg";
+    else ext = ".mp4";
+  }
+  const allowed = [".mp4", ".webm", ".mov", ".m4v", ".jpg", ".jpeg", ".png", ".webp", ".gif"];
+  const finalExt = allowed.includes(ext) ? ext : (contentType.startsWith("image/") ? ".jpg" : ".mp4");
   return `${Date.now()}-${crypto.randomBytes(3).toString("hex")}${finalExt}`;
+}
+
+function normalizeImageSrc(input) {
+  const raw = String(input || "").trim();
+  if (!raw) return "";
+  if (raw.startsWith("data:image/") && raw.length < 1_800_000) return raw;
+  if (raw.startsWith("/api/media/") || /^https?:\/\//i.test(raw)) return raw;
+  return "";
+}
+
+function attachOptionalMedia(item, body) {
+  const image = normalizeImageSrc(body.image);
+  if (image) item.image = image;
+  if (body.src) {
+    const media = normalizeVideoSrc(body.src);
+    if (media) {
+      item.src = media.src;
+      item.provider = media.provider;
+      if (media.youtubeId) item.youtubeId = media.youtubeId;
+    }
+  }
+  return item;
 }
 
 function youtubeId(input) {
@@ -513,7 +545,9 @@ function adminPayload() {
               type: item.type,
               title: item.title,
               minutes: item.minutes,
+              time: item.time || "",
               lang: itemLang(item),
+              image: item.image || "",
               src: item.src || "",
               provider: item.provider || "",
               youtubeId: item.youtubeId || ""
@@ -824,11 +858,20 @@ async function handleApi(req, res, url) {
       if (!open) return send(res, 403, { error: "Нет доступа к материалам" });
       const fileName = path.basename(pathname);
       const file = path.join(MEDIA, fileName);
-      const type = fileName.endsWith(".wav")
+      const lower = fileName.toLowerCase();
+      const type = lower.endsWith(".wav")
         ? "audio/wav"
-        : fileName.endsWith(".webm")
-          ? "video/webm"
-          : "video/mp4";
+        : lower.endsWith(".png")
+          ? "image/png"
+          : lower.endsWith(".webp")
+            ? "image/webp"
+            : lower.endsWith(".gif")
+              ? "image/gif"
+              : lower.endsWith(".jpg") || lower.endsWith(".jpeg")
+                ? "image/jpeg"
+                : lower.endsWith(".webm")
+                  ? "video/webm"
+                  : "video/mp4";
       if (file.startsWith(MEDIA) && fs.existsSync(file)) {
         return streamFile(req, res, file, type);
       }
@@ -1006,6 +1049,7 @@ async function handleApi(req, res, url) {
           ...(media.youtubeId ? { youtubeId: media.youtubeId } : {}),
           paragraphs: text ? text.split(/\n+/).map((line) => line.trim()).filter(Boolean).slice(0, 12) : []
         };
+        attachOptionalMedia(item, { image: body.image });
       } else if (kind === "recipe") {
         item = {
           id: uid("r"),
@@ -1016,6 +1060,7 @@ async function handleApi(req, res, url) {
           ingredients: String(body.ingredients || "").split(/\n+/).map((line) => line.trim()).filter(Boolean).slice(0, 30),
           steps: String(body.steps || "").split(/\n+/).map((line) => line.trim()).filter(Boolean).slice(0, 30)
         };
+        attachOptionalMedia(item, body);
       } else if (kind === "pose") {
         item = {
           id: uid("p"),
@@ -1026,6 +1071,7 @@ async function handleApi(req, res, url) {
           summary: String(body.summary || body.text || "").trim().slice(0, 800),
           tips: String(body.tips || "").split(/\n+/).map((line) => line.trim()).filter(Boolean).slice(0, 12)
         };
+        attachOptionalMedia(item, body);
       } else if (kind === "audio") {
         const text = String(body.text || "").trim().slice(0, 2000);
         item = {
@@ -1034,10 +1080,18 @@ async function handleApi(req, res, url) {
           title,
           lang,
           minutes: Math.max(1, Math.round(Number(body.minutes) || 5)),
-          src: String(body.src || "/api/media/ambient.wav").trim() || "/api/media/ambient.wav",
+          src: String(body.audio || body.src || "/api/media/ambient.wav").trim() || "/api/media/ambient.wav",
           intro: String(body.intro || "").trim().slice(0, 300),
           paragraphs: text ? text.split(/\n+/).map((line) => line.trim()).filter(Boolean).slice(0, 12) : []
         };
+        const image = normalizeImageSrc(body.image);
+        if (image) item.image = image;
+        const video = normalizeVideoSrc(body.video || body.videoSrc || "");
+        if (video) {
+          item.videoSrc = video.src;
+          item.videoProvider = video.provider;
+          if (video.youtubeId) item.youtubeId = video.youtubeId;
+        }
       } else {
         const text = String(body.text || "").trim().slice(0, 4000);
         item = {
@@ -1048,6 +1102,7 @@ async function handleApi(req, res, url) {
           minutes: Math.max(1, Math.round(Number(body.minutes) || 3)),
           paragraphs: text ? text.split(/\n+/).map((line) => line.trim()).filter(Boolean).slice(0, 20) : []
         };
+        attachOptionalMedia(item, body);
       }
       section.items.push(item);
       await saveDb();
@@ -1079,8 +1134,8 @@ async function handleApi(req, res, url) {
     if (req.method === "POST" && pathname === "/api/admin/upload") {
       const buffer = await readRawBody(req);
       if (!buffer.length) return send(res, 400, { error: "Пустой файл" });
-      const fileName = safeMediaName(req.headers["x-filename"] || "video.mp4");
-      const contentType = String(req.headers["content-type"] || "video/mp4").split(";")[0].trim();
+      const contentType = String(req.headers["content-type"] || "application/octet-stream").split(";")[0].trim();
+      const fileName = safeMediaName(req.headers["x-filename"] || "file.bin", contentType);
       const src = await storeMediaFile(fileName, buffer, contentType);
       return send(res, 200, { ok: true, src, fileName });
     }

@@ -384,8 +384,9 @@ h2 { font-size: 20px; margin: 18px 0 10px; }
 .badge-no { background: #fdecef; color: #a12848; border-radius: 999px; padding: 6px 10px; font-weight: 800; font-size: 13px; }
 
 .stage { position: relative; border-radius: 22px; overflow: hidden; background: #2b121c; margin-top: 8px; }
-.stage video, .stage iframe { width: 100%; display: block; max-height: 240px; background: #2b121c; border: 0; }
-.stage.yt iframe { max-height: none; aspect-ratio: 16 / 9; height: auto; min-height: 200px; }
+.stage video, .stage iframe, .stage img { width: 100%; display: block; max-height: 240px; background: #2b121c; border: 0; object-fit: cover; }
+.stage.photo img { max-height: 280px; }
+.stage.yt iframe { max-height: none; aspect-ratio: 16 / 9; height: auto; min-height: 200px; object-fit: unset; }
 .wm {
   position: absolute; left: 10px; top: 10px; color: rgba(255,255,255,.8);
   font-size: 11px; letter-spacing: 0.02em; text-shadow: 0 1px 2px rgba(0,0,0,.4);

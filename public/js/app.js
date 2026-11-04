@@ -612,32 +612,51 @@ function youtubeId(input) {
   return "";
 }
 
-function videoStageHtml(item) {
-  const yt = item.youtubeId || youtubeId(item.src);
-  if (yt || item.provider === "youtube") {
-    const id = yt || youtubeId(item.src);
+function videoStageHtml(item, srcOverride = "") {
+  const src = srcOverride || item.videoSrc || item.src || "";
+  if (!src) return "";
+  const provider = srcOverride || item.videoSrc ? (item.videoProvider || item.provider) : item.provider;
+  const yt = item.youtubeId || youtubeId(src);
+  if (yt || provider === "youtube") {
+    const id = yt || youtubeId(src);
     return `<div class="stage yt"><iframe id="lesson-video" title="${esc(item.title)}" src="https://www.youtube.com/embed/${esc(id)}?rel=0&modestbranding=1&playsinline=1" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe><div class="wm">${esc(state.user.email)}</div></div><p class="small muted" style="margin-top:8px">Скорость смотрите в плеере YouTube.</p>`;
   }
-  return `<div class="stage"><video id="lesson-video" controls playsinline controlsList="nodownload" disablepictureinpicture src="${esc(item.src)}"></video><div class="wm">${esc(state.user.email)}</div></div>${speedsHtml()}`;
+  return `<div class="stage"><video id="lesson-video" controls playsinline controlsList="nodownload" disablepictureinpicture src="${esc(src)}"></video><div class="wm">${esc(state.user.email)}</div></div>${speedsHtml()}`;
+}
+
+function itemImageHtml(item) {
+  if (!item.image) return "";
+  return `<div class="stage photo"><img src="${esc(item.image)}" alt="${esc(item.title)}" /><div class="wm">${esc(state.user.email)}</div></div>`;
+}
+
+function itemMediaHtml(item) {
+  let html = itemImageHtml(item);
+  if (item.type === "video") html += videoStageHtml(item);
+  else if (item.videoSrc) html += videoStageHtml(item, item.videoSrc);
+  else if (item.src && item.type !== "audio" && (item.provider === "youtube" || youtubeId(item.src) || /\.(mp4|webm|mov)(\?|$)/i.test(item.src) || item.src.includes("/api/media/"))) {
+    html += videoStageHtml(item);
+  }
+  return html;
+}
+
+function hasTimerSteps(item) {
+  return Array.isArray(item.steps) && item.steps[0] && typeof item.steps[0] === "object" && Number(item.steps[0].sec) > 0;
 }
 
 function lessonScreen() {
   const { course, item } = currentLocation();
   if (!course || course.locked || !item) return tariffsScreen();
   const paragraphs = (item.paragraphs || []).map((paragraph) => `<p>${esc(paragraph)}</p>`).join("");
-  let body = "";
-  if (item.type === "video") {
-    body += videoStageHtml(item);
-  }
+  let body = itemMediaHtml(item);
   if (item.type === "audio") {
     body += `<div class="card player-panel"><b>Аудио-практика</b><p class="small muted">Можно выключить экран — звук продолжится.</p><button class="btn-solid" id="audio-btn" type="button" data-action="audio-toggle">Слушать</button>${speedsHtml()}<div class="small" id="audio-time">0:00</div></div>`;
   }
-  if (item.steps) {
+  if (hasTimerSteps(item)) {
     const step = item.steps[timer.index] || item.steps[0];
     body += `<div class="card"><div class="timer-num" id="timer-num">${formatClock(timer.left || step.sec)}</div><b id="step-name">${esc(step.name)}</b><p class="small" id="step-text">${esc(step.text)}</p>${item.type === "video" || item.type === "audio" ? "" : speedsHtml()}<div class="btn-row"><button class="btn-solid" type="button" data-action="timer-toggle" id="timer-btn">${timer.running ? "Пауза" : "Старт"}</button><button class="btn-ghost" type="button" data-action="ambient">${media.playing && media.lessonId === item.id ? "Фон включён" : "Фоновый звук"}</button></div></div>`;
   }
   if (item.type === "recipe") {
-    body += `<div class="card recipe"><div class="small muted">${esc(item.time || "")}</div><b>Состав</b><ul>${(item.ingredients || []).map((line) => `<li>${esc(line)}</li>`).join("")}</ul><b>Как готовить</b><ol>${(item.steps || []).map((line) => `<li>${esc(line)}</li>`).join("")}</ol></div>`;
+    body += `<div class="card recipe"><div class="small muted">${esc(item.time || "")}</div><b>Состав</b><ul>${(item.ingredients || []).map((line) => `<li>${esc(line)}</li>`).join("")}</ul><b>Как готовить</b><ol>${(item.steps || []).map((line) => `<li>${esc(typeof line === "string" ? line : line.name || "")}</li>`).join("")}</ol></div>`;
   }
   if (item.type === "pose") {
     body += `<div class="card"><span class="pill">${esc(item.level)}</span><p>${esc(item.summary)}</p><ul>${(item.tips || []).map((tip) => `<li>${esc(tip)}</li>`).join("")}</ul><div class="wm" style="position:static;color:var(--muted)">Материал G-FIT · ${esc(state.user.email)}</div></div>`;
@@ -748,6 +767,11 @@ function adminMaterialForm(course, section) {
     : `<p class="small muted">В «${esc(section.title)}» пока нет материалов. Добавьте ниже.</p>`;
 
   const langField = `<label class="field"><span>Тіл / Язык урока</span><select id="item-lang"><option value="ru">Русский</option><option value="kk">Қазақша</option></select></label>`;
+  const mediaFields = `<label class="field"><span>Фото — ссылка</span><input id="item-image-url" placeholder="https://…/photo.jpg" /></label>
+      <label class="field"><span>Или фото с телефона</span><input id="item-image-file" type="file" accept="image/*" /></label>
+      <label class="field"><span>Видео — YouTube или mp4</span><input id="item-video-url" placeholder="https://youtu.be/… или https://…/video.mp4" /></label>
+      <label class="field"><span>Или видео-файл</span><input id="item-video-file" type="file" accept="video/mp4,video/webm,video/quicktime" /></label>
+      <p class="small muted">Фото и видео необязательны. На Vercel файл лучше до ~4 МБ.</p>`;
 
   if (kind === "games") {
     return `${list}<p class="small muted" style="margin-top:12px">Игры уже встроены в курс. Новые карточки здесь пока не редактируются.</p>`;
@@ -760,8 +784,10 @@ function adminMaterialForm(course, section) {
       ${langField}
       <label class="field"><span>Название</span><input id="item-title" placeholder="Название материала" /></label>
       <label class="field"><span>Длительность, мин</span><input id="item-minutes" type="number" min="1" value="8" /></label>
-      <label class="field"><span>Ссылка YouTube или mp4</span><input id="item-url" placeholder="https://youtu.be/… или https://…/video.mp4" /></label>
-      <label class="field"><span>Или файл с телефона / компьютера</span><input id="item-file" type="file" accept="video/mp4,video/webm,video/quicktime" /></label>
+      <label class="field"><span>Фото — ссылка (необязательно)</span><input id="item-image-url" placeholder="https://…/photo.jpg" /></label>
+      <label class="field"><span>Или фото с телефона</span><input id="item-image-file" type="file" accept="image/*" /></label>
+      <label class="field"><span>Ссылка YouTube или mp4</span><input id="item-video-url" placeholder="https://youtu.be/… или https://…/video.mp4" /></label>
+      <label class="field"><span>Или файл с телефона / компьютера</span><input id="item-video-file" type="file" accept="video/mp4,video/webm,video/quicktime" /></label>
       <label class="field"><span>Текст под видео</span><textarea id="item-text" rows="3" placeholder="Каждый абзац с новой строки"></textarea></label>
       <p class="small muted">Можно вставить обычную ссылку YouTube — ученик увидит встроенный плеер.</p>
       <button class="btn-solid" type="button" data-action="add-item" data-type="video">Добавить в «${esc(section.title)}»</button>
@@ -775,6 +801,7 @@ function adminMaterialForm(course, section) {
       ${langField}
       <label class="field"><span>Название</span><input id="item-title" placeholder="Название материала" /></label>
       <label class="field"><span>Время</span><input id="item-time" placeholder="15 минут" /></label>
+      ${mediaFields}
       <label class="field"><span>Состав, каждый с новой строки</span><textarea id="item-ingredients" rows="3" placeholder="40 г овсянки&#10;200 мл молока"></textarea></label>
       <label class="field"><span>Шаги, каждый с новой строки</span><textarea id="item-steps" rows="3" placeholder="Сварите хлопья&#10;Добавьте ягоды"></textarea></label>
       <button class="btn-solid" type="button" data-action="add-item" data-type="recipe">Добавить в «${esc(section.title)}»</button>
@@ -788,6 +815,7 @@ function adminMaterialForm(course, section) {
       ${langField}
       <label class="field"><span>Название</span><input id="item-title" placeholder="Название позы" /></label>
       <label class="field"><span>Уровень</span><input id="item-level" value="Мягко" /></label>
+      ${mediaFields}
       <label class="field"><span>Описание</span><textarea id="item-text" rows="3" placeholder="Кратко о позе"></textarea></label>
       <label class="field"><span>Советы, каждый с новой строки</span><textarea id="item-tips" rows="3"></textarea></label>
       <button class="btn-solid" type="button" data-action="add-item" data-type="pose">Добавить в «${esc(section.title)}»</button>
@@ -801,7 +829,8 @@ function adminMaterialForm(course, section) {
       ${langField}
       <label class="field"><span>Название</span><input id="item-title" placeholder="Название практики" /></label>
       <label class="field"><span>Длительность, мин</span><input id="item-minutes" type="number" min="1" value="7" /></label>
-      <label class="field"><span>Ссылка на аудио (необязательно)</span><input id="item-url" placeholder="/api/media/ambient.wav" /></label>
+      <label class="field"><span>Ссылка на аудио (необязательно)</span><input id="item-audio-url" placeholder="/api/media/ambient.wav" /></label>
+      ${mediaFields}
       <label class="field"><span>Текст</span><textarea id="item-text" rows="3"></textarea></label>
       <button class="btn-solid" type="button" data-action="add-item" data-type="audio">Добавить в «${esc(section.title)}»</button>
     </div>`;
@@ -813,6 +842,7 @@ function adminMaterialForm(course, section) {
     ${langField}
     <label class="field"><span>Название</span><input id="item-title" placeholder="Название материала" /></label>
     <label class="field"><span>Минуты чтения</span><input id="item-minutes" type="number" min="1" value="4" /></label>
+    ${mediaFields}
     <label class="field"><span>Текст, каждый абзац с новой строки</span><textarea id="item-text" rows="4"></textarea></label>
     <button class="btn-solid" type="button" data-action="add-item" data-type="article">Добавить в «${esc(section.title)}»</button>
   </div>`;
@@ -973,7 +1003,7 @@ function pauseTimer() {
 
 function prepareTimer(reset) {
   const { item } = currentLocation();
-  if (!item?.steps) return;
+  if (!hasTimerSteps(item)) return;
   if (reset || timer.left <= 0) {
     timer.index = 0;
     timer.left = item.steps[0].sec;
@@ -994,7 +1024,7 @@ function syncLesson() {
 
 function paintTimer() {
   const { item } = currentLocation();
-  if (!item?.steps) return;
+  if (!hasTimerSteps(item)) return;
   const step = item.steps[timer.index];
   const numNode = document.getElementById("timer-num");
   if (!numNode || !step) return;
@@ -1009,7 +1039,7 @@ function paintTimer() {
 
 function tick() {
   const { item } = currentLocation();
-  if (!item?.steps) return pauseTimer();
+  if (!hasTimerSteps(item)) return pauseTimer();
   timer.left -= 0.2 * state.speed;
   if (timer.left <= 0) {
     if (timer.index < item.steps.length - 1) {
@@ -1251,13 +1281,13 @@ async function loadAdmin() {
   state.adminAuthed = true;
 }
 
-async function uploadAdminVideo(file) {
+async function uploadAdminMedia(file) {
   const response = await fetch("/api/admin/upload", {
     method: "POST",
     credentials: "same-origin",
     headers: {
-      "Content-Type": file.type || "video/mp4",
-      "X-Filename": file.name || "video.mp4"
+      "Content-Type": file.type || "application/octet-stream",
+      "X-Filename": file.name || "file.bin"
     },
     body: file
   });
@@ -1299,16 +1329,24 @@ async function addAdminItem(type) {
     level: document.getElementById("item-level")?.value || "",
     intro: document.getElementById("item-intro")?.value || "",
     lang: document.getElementById("item-lang")?.value || "ru",
-    src: (document.getElementById("item-url")?.value || "").trim()
+    image: (document.getElementById("item-image-url")?.value || "").trim(),
+    src: (document.getElementById("item-video-url")?.value || "").trim(),
+    video: (document.getElementById("item-video-url")?.value || "").trim(),
+    audio: (document.getElementById("item-audio-url")?.value || "").trim()
   };
-  if (type === "video") {
-    const file = document.getElementById("item-file")?.files?.[0];
-    if (file) {
-      toast("Загружаем файл…");
-      body.src = await uploadAdminVideo(file);
-    }
-    if (!body.src) throw new Error("Добавьте ссылку YouTube, mp4 или файл");
+  const imageFile = document.getElementById("item-image-file")?.files?.[0];
+  const videoFile = document.getElementById("item-video-file")?.files?.[0];
+  if (imageFile) {
+    toast("Загружаем фото…");
+    body.image = await uploadAdminMedia(imageFile);
   }
+  if (videoFile) {
+    toast("Загружаем видео…");
+    const uploaded = await uploadAdminMedia(videoFile);
+    body.src = uploaded;
+    body.video = uploaded;
+  }
+  if (type === "video" && !body.src) throw new Error("Добавьте ссылку YouTube, mp4 или файл");
   state.admin = await api("/api/admin/items", { method: "POST", body });
   toast("Материал добавлен");
   render();
